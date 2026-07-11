@@ -4,11 +4,12 @@ This module implements a registry system for managing AI models.
 
 import uuid
 from typing import Dict, Optional, List, Type
+import logging # Import logging module
 
 from app.ai.ai_model import AIModel
 from app.core.logger import setup_logging
 
-logger = setup_logging()
+logger: logging.Logger = setup_logging() # Assign the returned logger instance
 
 class ModelRegistry:
     """

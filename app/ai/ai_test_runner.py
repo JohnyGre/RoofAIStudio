@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import cv2
 import uuid
+from typing import Optional # Added Optional import
 
 from app.ai.ai_engine import AIEngine
 from app.ai.models.yolo_adapter import YOLOSegmentationModel
@@ -134,7 +135,7 @@ class AITestRunner:
             # For simplicity, draw the 2D polygon of the plane onto the mask
             # In a real scenario, you'd get the mask directly from SegmentationResult
             if plane.polygon.vertices:
-                pts = np.array([[p.x, p.y] for p in plane.polygon.vertices], np.int3).reshape((-1, 1, 2))
+                pts = np.array([[p.x, p.y] for p in plane.polygon.vertices], np.int32).reshape((-1, 1, 2)) # Changed np.int3 to np.int32
                 cv2.fillPoly(combined_mask, [pts], 255)
         cv2.imwrite(str(test_output_dir / f"{output_name}_mask.png"), combined_mask)
 
@@ -142,7 +143,7 @@ class AITestRunner:
         image_with_contours = image_data_bgr.copy()
         for plane in roof_geometry.planes:
             if plane.polygon.vertices:
-                pts = np.array([[p.x, p.y] for p in plane.polygon.vertices], np.int3).reshape((-1, 1, 2))
+                pts = np.array([[p.x, p.y] for p in plane.polygon.vertices], np.int32).reshape((-1, 1, 2)) # Changed np.int3 to np.int32
                 cv2.polylines(image_with_contours, [pts], True, (0, 255, 0), 2) # Green contours
         cv2.imwrite(str(test_output_dir / f"{output_name}_contours.jpg"), image_with_contours)
 

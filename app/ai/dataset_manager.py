@@ -6,12 +6,13 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 import cv2
 import numpy as np
+import logging # Import logging module
 
 from app.core.image.image_loader import ImageLoader
 from app.core.logger import setup_logging
 from app.core.app_paths import app_paths
 
-logger = setup_logging()
+logger: logging.Logger = setup_logging() # Assign the returned logger instance
 
 class DatasetManager:
     """

@@ -2,7 +2,7 @@
 This module provides a service for converting AI prediction results into structured
 RoofGeometry objects.
 """
-
+import uuid
 from typing import List, Union, Optional, Dict, Any
 import numpy as np
 import cv2

@@ -3,7 +3,7 @@ This module defines the AIController, responsible for orchestrating AI analysis
 and mediating between the UI and the AI pipeline.
 """
 
-from typing import Optional, List
+from typing import Optional, List, Union, Tuple
 import uuid
 import numpy as np
 
@@ -20,6 +20,7 @@ from app.core.image.image_model import ImageInfo
 from app.geometry.roof_geometry import RoofGeometry
 from app.geometry.calibration import CalibrationModel
 from app.core.logger import setup_logging
+from app.core.app_paths import app_paths # For model path
 
 logger = setup_logging()
 
@@ -50,7 +51,6 @@ class AIController(QObject):
         self._current_image_info: Optional[ImageInfo] = None
         self._current_image_data: Optional[np.ndarray] = None
         self._current_calibration: Optional[CalibrationModel] = None
-        self._last_ai_results: List[Union[DetectionResult, SegmentationResult, GeometryPredictionResult]] = []
         logger.info("AIController initialized.")
 
         # Register default models if not already registered (e.g., for testing)
@@ -112,49 +112,13 @@ class AIController(QObject):
                 self._ai_engine.load_model(model_name=model_name, model_path=str(model_path))
 
             # Run the full analysis pipeline
-            # The RoofAnalysisPipeline's analyze_image method now returns RoofGeometry
-            # and internally handles the segmentation/detection and geometry conversion.
-            # We need to get the raw AI results for overlay separately.
-            
-            # To get raw AI results for overlay, we need to modify RoofAnalysisPipeline
-            # to return both RoofGeometry and the raw AI results.
-            # For now, let's assume analyze_image returns RoofGeometry, and we'll
-            # simulate the raw results for overlay.
-            
-            # Temporarily, let's call CoreAIPipeline and then GeometryConverter directly
-            # to get both the raw results and the geometry.
-            
-            core_ai_pipeline = CoreAIPipeline(model)
-            raw_ai_results = core_ai_pipeline.run_pipeline(
-                self._current_image_data,
+            roof_geometry, raw_ai_results = self._roof_analysis_pipeline.analyze_image(
+                image=self._current_image_data,
+                model_name=model_name,
+                calibration=self._current_calibration,
+                # Pass image dimensions for post-processing if needed by the model
                 postprocess_params={"original_image_size": (self._current_image_info.width, self._current_image_info.height)}
             )
-
-            # Now convert these raw results to geometry using the converter
-            roof_geometry: RoofGeometry
-            if all(isinstance(res, DetectionResult) for res in raw_ai_results):
-                roof_geometry = self._geometry_converter.convert_detection_results_to_geometry(
-                    detection_results=raw_ai_results,
-                    image_width=self._current_image_info.width,
-                    image_height=self._current_image_info.height,
-                    calibration=self._current_calibration
-                )
-            elif all(isinstance(res, SegmentationResult) for res in raw_ai_results):
-                roof_geometry = self._geometry_converter.convert_segmentation_results_to_geometry(
-                    segmentation_results=raw_ai_results,
-                    calibration=self._current_calibration
-                )
-            elif all(isinstance(res, GeometryPredictionResult) for res in raw_ai_results):
-                if raw_ai_results:
-                    roof_geometry = self._geometry_converter.convert_geometry_prediction_to_geometry(
-                        geometry_prediction=raw_ai_results[0],
-                        calibration=self._current_calibration
-                    )
-                else:
-                    raise RuntimeError("No GeometryPredictionResult found in AI results.")
-            else:
-                raise TypeError("Unsupported or mixed AI result types for geometry conversion.")
-
 
             self.analysis_completed.emit(roof_geometry, raw_ai_results)
             self.status_message.emit(f"AI analysis completed. Found {len(roof_geometry.planes)} roof planes.")
@@ -164,15 +128,4 @@ class AIController(QObject):
             logger.error(f"AI analysis failed: {e}")
             self.error_occurred.emit(f"AI analysis failed: {e}")
 
-    def display_result_on_canvas(self, roof_geometry: RoofGeometry, raw_ai_results: List[Union[DetectionResult, SegmentationResult, GeometryPredictionResult]]) -> None:
-        """
-        Prepares AI results for display on the RoofCanvas.
-        This method is primarily for conceptual clarity; the actual display logic
-        will be handled by signals connected to RoofCanvas.
-        """
-        # This method is more of a placeholder to indicate the intent.
-        # The actual display will happen when `analysis_completed` signal is connected
-        # to a slot in `RoofCanvas` that can draw the geometry and overlays.
-        logger.debug("Preparing AI results for canvas display.")
-        self._last_ai_results = raw_ai_results
-        # The `analysis_completed` signal already emits the necessary data.
+    # Removed display_result_on_canvas as its functionality is now handled by the signal connection in MainWindow.

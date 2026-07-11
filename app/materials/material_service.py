@@ -5,7 +5,7 @@ This module defines the MaterialService for business logic related to materials.
 import uuid
 from typing import Optional, List
 
-from app.materials.material_model import Material
+from app.materials.material_model import Material, MaterialCategory, MaterialManufacturer
 from app.materials.material_repository import MaterialRepository
 from app.database.enums import MaterialUnit as DBMaterialUnit
 

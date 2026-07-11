@@ -3,7 +3,7 @@ This module defines the abstract base class for all vision-based AI detectors.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union # Added Union import
 
 import numpy as np
 

@@ -8,8 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Column, DateTime
-from sqlalchemy.dialects.sqlite import UUID as SQLiteUUID
+from sqlalchemy import Column, DateTime, Uuid # Changed import to Uuid from sqlalchemy
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -21,9 +20,10 @@ class BaseModel:
     Mixin for common model attributes: id, created_at, updated_at.
     """
     __abstract__ = True
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(
-        SQLiteUUID(as_uuid=True),
+        Uuid(as_uuid=True), # Use Uuid directly
         primary_key=True,
         default=uuid.uuid4,
         unique=True,

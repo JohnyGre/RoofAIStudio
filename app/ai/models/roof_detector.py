@@ -4,6 +4,7 @@ This module implements a placeholder RoofDetector using OpenCV for initial testi
 
 import uuid
 from typing import Any, Dict, List, Union, Optional
+import logging # Import logging module
 
 import cv2
 import numpy as np
@@ -12,7 +13,7 @@ from app.ai.models.vision_detector import VisionDetector
 from app.ai.ai_result import DetectionResult, BoundingBox, SegmentationResult, GeometryPredictionResult
 from app.core.logger import setup_logging
 
-logger = setup_logging()
+logger: logging.Logger = setup_logging() # Assign the returned logger instance
 
 class RoofDetector(VisionDetector):
     """

@@ -4,7 +4,7 @@ This module defines the main application window for Roof AI Studio.
 
 from pathlib import Path
 from typing import List, Union
-from PySide6.QtWidgets import QMainWindow, QFileDialog, QMessageBox, QToolButton
+from PySide6.QtWidgets import QMainWindow, QFileDialog, QMessageBox, QToolButton, QMenu
 from PySide6.QtCore import Qt, QPointF
 from PySide6.QtGui import QIcon
 

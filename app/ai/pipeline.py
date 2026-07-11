@@ -5,6 +5,7 @@ This module defines the core AI processing pipeline stages (preprocessing, infer
 from typing import Any, Callable, List, Dict, Union, Optional
 import numpy as np
 import cv2 # For image processing in pipeline stages
+import logging # Import logging module
 
 from app.ai.ai_model import AIModel
 from app.ai.ai_result import DetectionResult, GeometryPredictionResult, BoundingBox
@@ -12,7 +13,7 @@ from app.ai.segmentation_result import SegmentationResult # Use new Segmentation
 from app.core.logger import setup_logging
 from app.core.image.image_processor import ImageProcessor
 
-logger = setup_logging()
+logger: logging.Logger = setup_logging() # Assign the returned logger instance
 
 class CoreAIPipeline:
     """

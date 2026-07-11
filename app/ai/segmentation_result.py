@@ -12,9 +12,9 @@ class SegmentationResult:
     """
     Represents the result of an image segmentation task.
     """
-    id: uuid.UUID = field(default_factory=uuid.uuid4)
     mask: np.ndarray # Binary mask (e.g., 0s and 1s) or probability map
     class_name: str
+    id: uuid.UUID = field(default_factory=uuid.uuid4) # Moved to after required fields
     confidence: Optional[float] = None # Overall confidence for the mask
     image_size: Optional[tuple[int, int]] = None # (width, height) of the original image
     metadata: Dict[str, Any] = field(default_factory=dict)

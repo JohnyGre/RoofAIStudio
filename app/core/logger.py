@@ -9,7 +9,7 @@ from pathlib import Path
 from app.core.app_paths import app_paths
 from app.core.app_info import APP_NAME
 
-def setup_logging(log_level: int = logging.INFO) -> None:
+def setup_logging(log_level: int = logging.INFO) -> logging.Logger:
     """
     Configures the application's logging system.
 
@@ -20,6 +20,9 @@ def setup_logging(log_level: int = logging.INFO) -> None:
 
     Args:
         log_level (int): The minimum logging level to capture (e.g., logging.INFO, logging.DEBUG).
+    
+    Returns:
+        logging.Logger: The configured logger instance.
     """
     # Ensure the logs directory exists
     log_dir: Path = app_paths.logs_dir
@@ -59,15 +62,10 @@ def setup_logging(log_level: int = logging.INFO) -> None:
         # Set propagate to False to prevent messages from being passed to the root logger
         # if the root logger also has handlers configured elsewhere.
         logger.propagate = False
+    
+    return logger
 
 # Initialize logging when the module is imported
-setup_logging()
-
-# Example usage (can be removed after verification)
-# if __name__ == "__main__":
-#     logger = logging.getLogger(APP_NAME)
-#     logger.debug("This is a debug message.")
-#     logger.info("This is an info message.")
-#     logger.warning("This is a warning message.")
-#     logger.error("This is an error message.")
-#     logger.critical("This is a critical message.")
+# This will ensure the root logger for the app is configured,
+# but individual modules should still call setup_logging() to get their own logger instance.
+_ = setup_logging()

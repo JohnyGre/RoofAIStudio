@@ -6,6 +6,7 @@ from image input to segmented roof geometry.
 from typing import List, Optional, Union
 import numpy as np
 import uuid
+import logging # Import logging module
 
 from app.ai.segmentation_model import AbstractSegmentationModel
 from app.ai.segmentation_result import SegmentationResult
@@ -17,7 +18,7 @@ from app.geometry.roof_geometry import RoofGeometry
 from app.geometry.calibration import CalibrationModel, CalibrationService
 from app.core.logger import setup_logging
 
-logger = setup_logging()
+logger: logging.Logger = setup_logging() # Assign the returned logger instance
 
 class RoofSegmentationService:
     """
@@ -130,7 +131,7 @@ class RoofSegmentationService:
                     if sr.class_name == "roof_area": # Assuming the segmentation model outputs "roof_area"
                         heights = [0.0] * len(real_world_polygon.vertices) # Placeholder for Z coordinates
                         plane = RoofPlane(
-                            name=f"SegmentedPlane_{uuid.uuid4().hex[:8]}",
+                            name=f"SegmentedPlane_{sr.id}_{uuid.uuid4().hex[:4]}",
                             polygon=real_world_polygon,
                             slope=default_slope_degrees,
                             orientation=default_orientation_degrees,

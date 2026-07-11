@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QWidget, QSizePolicy,
     QGraphicsEllipseItem, QGraphicsLineItem, QGraphicsPolygonItem
 )
-from PySide6.QtGui import QPixmap, QTransform, QMouseEvent, QWheelEvent, QPen, QBrush, QColor, QImage, QPolygonF
+from PySide6.QtGui import QPixmap, QTransform, QMouseEvent, QWheelEvent, QPen, QBrush, QColor, QImage, QPolygonF, QPainter
 from PySide6.QtCore import Qt, Signal, QPointF, QRectF
 
 from app.core.image.image_model import ImageInfo
@@ -49,7 +49,9 @@ class RoofCanvas(QGraphicsView):
             parent (QWidget, optional): The parent widget. Defaults to None.
         """
         super().__init__(parent)
-        self.setRenderHint(QGraphicsView.RenderHint.Antialiasing)
+        # Use QPainter render hint for antialiasing and smooth pixmap transforms
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.setRenderHints(self.renderHints() | QPainter.RenderHint.SmoothPixmapTransform)
         self.setDragMode(QGraphicsView.DragMode.NoDrag) # Initially no drag, will change for pan
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)

@@ -4,35 +4,38 @@ It orchestrates AI model registration, prediction execution, and pipeline manage
 """
 
 import uuid
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, TYPE_CHECKING
+import logging
 
 import numpy as np
 
 from app.ai.ai_model import AIModel
 from app.ai.model_registry import model_registry
-from app.ai.pipeline import CoreAIPipeline # Renamed from AIPipeline
-from app.ai.ai_result import DetectionResult, SegmentationResult, GeometryPredictionResult
-from app.ai.geometry_converter import GeometryConverter # New import
-from app.ai.prediction_pipeline import RoofAnalysisPipeline # New import
 from app.core.logger import setup_logging
-from app.geometry.roof_geometry import RoofGeometry
-from app.geometry.calibration import CalibrationModel # New import
 
-logger = setup_logging()
+# Use TYPE_CHECKING to avoid circular imports for type hints
+if TYPE_CHECKING:
+    from app.ai.prediction_pipeline import RoofAnalysisPipeline
+    from app.ai.geometry_converter import GeometryConverter
+    from app.geometry.roof_geometry import RoofGeometry
+    from app.geometry.calibration import CalibrationModel
+    from app.ai.ai_result import DetectionResult, SegmentationResult, GeometryPredictionResult
+
+logger: logging.Logger = setup_logging()
 
 class AIEngine:
     """
     The central AI Engine responsible for managing and executing AI operations.
-    It uses a ModelRegistry to keep track of available models and orchestrates
-    prediction workflows through RoofAnalysisPipeline.
+    It uses a ModelRegistry to keep track of available models.
+    High-level prediction workflows are orchestrated by RoofAnalysisPipeline,
+    which receives an AIEngine instance.
     """
 
     def __init__(self):
         """
         Initializes the AI Engine.
         """
-        self._model_registry = model_registry # Use the singleton registry
-        self._geometry_converter = GeometryConverter() # Instantiate GeometryConverter
+        self._model_registry = model_registry
         logger.info("AI Engine initialized.")
 
     def register_model(self, model: AIModel) -> None:
@@ -51,7 +54,13 @@ class AIEngine:
         Args:
             model_id (uuid.UUID): The ID of the model to unregister.
         """
-        self._model_registry.unregister_model(model_id)
+        if model_id in self._model_registry._models: # Access internal dict for direct removal
+            model = self._model_registry._models.pop(model_id)
+            if model.model_name in self._model_registry._name_to_id and self._model_registry._name_to_id[model.model_name] == model_id:
+                del self._model_registry._name_to_id[model.model_name]
+            logger.info(f"Unregistered AI model: {model.model_name} (ID: {model_id})")
+        else:
+            logger.warning(f"Attempted to unregister non-existent model with ID: {model_id}")
 
     def get_model(self, model_id: Optional[uuid.UUID] = None, model_name: Optional[str] = None) -> Optional[AIModel]:
         """
@@ -118,36 +127,5 @@ class AIEngine:
         else:
             logger.warning(f"Attempted to unload non-existent model with ID '{model_id}' or name '{model_name}'.")
 
-    def predict_geometry(
-        self,
-        image: np.ndarray,
-        model_id: Optional[uuid.UUID] = None,
-        model_name: Optional[str] = None,
-        calibration: Optional[CalibrationModel] = None,
-        **pipeline_kwargs
-    ) -> RoofGeometry:
-        """
-        Executes the AI pipeline to predict roof geometry from an image.
-
-        Args:
-            image (np.ndarray): The input image (OpenCV BGR format).
-            model_id (Optional[uuid.UUID]): The ID of the model to use for prediction.
-            model_name (Optional[str]): The name of the model to use for prediction.
-            calibration (Optional[CalibrationModel]): Calibration data for pixel-to-real-world conversion.
-            **pipeline_kwargs: Additional keyword arguments to pass to the RoofAnalysisPipeline's analyze_image method.
-
-        Returns:
-            RoofGeometry: The predicted roof geometry.
-
-        Raises:
-            ValueError: If no model is specified or found, or if the model is not loaded.
-        """
-        # The RoofAnalysisPipeline now orchestrates the full process
-        analysis_pipeline = RoofAnalysisPipeline(self, self._geometry_converter)
-        return analysis_pipeline.analyze_image(
-            image=image,
-            model_id=model_id,
-            model_name=model_name,
-            calibration=calibration,
-            **pipeline_kwargs
-        )
+    # Removed predict_geometry method from AIEngine to break circular dependency.
+    # This functionality is now handled by AIController via RoofAnalysisPipeline.

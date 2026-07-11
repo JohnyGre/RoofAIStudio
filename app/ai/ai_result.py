@@ -33,10 +33,10 @@ class DetectionResult:
     """
     Represents the result of an object detection task.
     """
-    id: uuid.UUID = field(default_factory=uuid.uuid4)
     bounding_box: BoundingBox
     confidence: float
     class_name: str
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -48,10 +48,11 @@ class SegmentationResult:
     """
     Represents the result of an image segmentation task.
     """
-    id: uuid.UUID = field(default_factory=uuid.uuid4)
     mask: np.ndarray # Binary mask (e.g., 0s and 1s) or probability map
     class_name: str
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
     confidence: Optional[float] = None # Overall confidence for the mask
+    image_size: Optional[tuple[int, int]] = None # (width, height) of the original image
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -69,8 +70,8 @@ class GeometryPredictionResult:
     This could be a serialized representation of app.geometry.RoofGeometry
     or a simplified version.
     """
-    id: uuid.UUID = field(default_factory=uuid.uuid4)
     predicted_geometry_data: Dict[str, Any] # Dictionary representing the predicted geometry
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
     confidence: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 

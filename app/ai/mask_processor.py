@@ -5,12 +5,13 @@ This module provides utilities for processing segmentation masks.
 from typing import List, Tuple, Optional
 import numpy as np
 import cv2
+import logging # Import logging module
 
 from app.geometry.point import Point2D
 from app.geometry.polygon import Polygon2D
 from app.core.logger import setup_logging
 
-logger = setup_logging()
+logger: logging.Logger = setup_logging() # Assign the returned logger instance
 
 class MaskProcessor:
     """

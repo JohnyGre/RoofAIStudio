@@ -13,8 +13,8 @@ class RoofLayer:
     """
     Represents a single layer within a roof system composition.
     """
-    id: uuid.UUID = field(default_factory=uuid.uuid4)
     name: str
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
     material: Optional[Material] = None # The specific material used for this layer
     thickness: Optional[float] = None # e.g., in mm or inches
     description: Optional[str] = None
@@ -25,8 +25,8 @@ class RoofSystem:
     """
     Represents a complete roof composition, including multiple layers of materials.
     """
-    id: uuid.UUID = field(default_factory=uuid.uuid4)
     name: str
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
     description: Optional[str] = None
     layers: List[RoofLayer] = field(default_factory=list)
 

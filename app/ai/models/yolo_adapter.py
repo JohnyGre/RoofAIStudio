@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import cv2
 import torch # For CUDA detection
+import logging # Import logging module
 
 from app.ai.segmentation_model import AbstractSegmentationModel
 from app.ai.segmentation_result import SegmentationResult
@@ -19,7 +20,7 @@ except ImportError:
     YOLO = None
     setup_logging().warning("Ultralytics YOLO not installed. YOLOSegmentationModel will not be functional.")
 
-logger = setup_logging()
+logger: logging.Logger = setup_logging() # Assign the returned logger instance
 
 class YOLOSegmentationModel(AbstractSegmentationModel):
     """

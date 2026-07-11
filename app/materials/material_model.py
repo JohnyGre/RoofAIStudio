@@ -46,3 +46,9 @@ class Material:
             raise ValueError("Material price cannot be negative.")
         if not (0 <= self.waste_factor < 1):
             raise ValueError("Waste factor must be between 0 and 1 (exclusive of 1).")
+
+
+# Export the DB enum under the MaterialUnit name so external modules can import it from this module
+MaterialUnit = DBMaterialUnit
+
+__all__ = ["Material", "MaterialCategory", "MaterialManufacturer", "MaterialUnit"]
