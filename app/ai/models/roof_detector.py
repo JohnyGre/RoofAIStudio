@@ -130,13 +130,21 @@ class RoofDetector(VisionDetector):
             x, y, w, h = cv2.boundingRect(largest_roof_contour)
             bbox = BoundingBox(x_min=float(x), y_min=float(y), x_max=float(x + w), y_max=float(y + h))
             
+            # Extract polygon vertices from the approx contour (ensure Nx2 list of ints)
+            try:
+                poly_pts = [ (int(p[0]), int(p[1])) for p in largest_roof_contour.reshape(-1, 2) ]
+            except Exception:
+                poly_pts = [ (int(p[0]), int(p[1])) for p in largest_roof_contour ]
+
+            metadata = {"source": "OpenCV Roof Detection", "contour_area": max_contour_area, "contour_polygon": poly_pts}
+
             results.append(DetectionResult(
                 bounding_box=bbox,
                 confidence=confidence_score,
                 class_name="roof_area",
-                metadata={"source": "OpenCV Roof Detection", "contour_area": max_contour_area}
+                metadata=metadata
             ))
-            logger.info(f"Detected largest roof area with bounding box: {bbox}")
+            logger.info(f"Detected largest roof area with bounding box: {bbox} and polygon with {len(poly_pts)} vertices")
         else:
             logger.info("No suitable roof-like contour found.")
         
