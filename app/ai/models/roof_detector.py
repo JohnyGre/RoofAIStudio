@@ -1,10 +1,10 @@
 """
-This module implements a placeholder RoofDetector using OpenCV for initial testing.
+This module implements a basic OpenCV-based roof detection.
 """
 
 import uuid
 from typing import Any, Dict, List, Union, Optional
-import logging # Import logging module
+import logging
 
 import cv2
 import numpy as np
@@ -13,91 +13,138 @@ from app.ai.models.vision_detector import VisionDetector
 from app.ai.ai_result import DetectionResult, BoundingBox, SegmentationResult, GeometryPredictionResult
 from app.core.logger import setup_logging
 
-logger: logging.Logger = setup_logging() # Assign the returned logger instance
+logger = setup_logging()
 
 class RoofDetector(VisionDetector):
     """
-    A placeholder implementation of a roof detector using OpenCV.
-    It simulates detection by finding contours or simple shapes in an image.
-    This class will be replaced by actual ML models (YOLO, SAM, etc.) later.
+    A basic roof detector using OpenCV operations to find the largest roof-like contour.
+    This serves as a functional placeholder until more advanced ML models are integrated.
     """
     MODEL_NAME = "OpenCV_Roof_Detector"
-    VERSION = "0.0.1-placeholder"
+    VERSION = "0.1.0-opencv"
 
     def __init__(self, model_id: Optional[uuid.UUID] = None):
         super().__init__(self.MODEL_NAME, self.VERSION, model_id)
         self._model_info: Dict[str, Any] = {
             "name": self.MODEL_NAME,
             "version": self.VERSION,
-            "description": "Placeholder roof detector using OpenCV contour finding.",
+            "description": "Basic roof detector using OpenCV contour finding, morphology, and polygon approximation.",
             "input_requirements": "BGR NumPy array image",
             "output_format": "List[DetectionResult]",
-            "trained_classes": ["roof_area", "potential_opening"]
+            "trained_classes": ["roof_area"] # This detector primarily finds general roof areas
         }
 
     def load(self, model_path: str = "", device: str = "cpu", **kwargs) -> None:
         """
-        Loads the placeholder model. No actual model file is loaded.
+        Loads the detector. No actual model file is loaded for this OpenCV-based detector.
         """
-        logger.info(f"Placeholder RoofDetector '{self.model_name}' loaded (no actual model file).")
+        logger.info(f"OpenCV RoofDetector '{self.model_name}' loaded (no external model file).")
         self._is_loaded = True
 
     def detect(self, image: np.ndarray, **kwargs) -> List[Union[DetectionResult, SegmentationResult, GeometryPredictionResult]]:
         """
-        Simulates roof detection using basic OpenCV operations (e.g., contour finding).
+        Detects roof areas in the input image using OpenCV contour processing.
 
         Args:
             image (np.ndarray): The input image data (NumPy array, BGR format).
-            **kwargs: Additional parameters (e.g., confidence_threshold).
+            **kwargs: Additional parameters for OpenCV processing:
+                      - `blur_kernel_size` (int): Kernel size for Gaussian blur (default 5).
+                      - `canny_threshold1` (int): First threshold for the Canny edge detector (default 50).
+                      - `canny_threshold2` (int): Second threshold for the Canny edge detector (default 150).
+                      - `morph_kernel_size` (int): Kernel size for morphological operations (default 5).
+                      - `min_contour_area_ratio` (float): Minimum contour area as a ratio of total image area (default 0.01).
+                      - `max_contour_area_ratio` (float): Maximum contour area as a ratio of total image area (default 0.95).
+                      - `approx_poly_epsilon_factor` (float): Factor for cv2.approxPolyDP (default 0.02).
+                      - `confidence_score` (float): Fixed confidence score for detected roofs (default 0.9).
 
         Returns:
-            List[DetectionResult]: A list of simulated detection results.
+            List[DetectionResult]: A list containing a single DetectionResult for the largest roof-like contour found.
+                                   Returns an empty list if no suitable contour is found.
         """
         if not self.is_loaded:
             raise RuntimeError(f"Model '{self.model_name}' is not loaded. Call load() first.")
         if not self.validate(image):
             raise ValueError("Invalid image input for detection.")
 
-        results: List[DetectionResult] = []
         height, width, _ = image.shape
+        image_area = float(height * width)
 
-        # Convert to grayscale
+        # --- Parameters from kwargs or defaults ---
+        blur_kernel_size = kwargs.get("blur_kernel_size", 5)
+        # Use automatic Canny thresholds by default for robustness
+        canny_threshold1 = kwargs.get("canny_threshold1", None)
+        canny_threshold2 = kwargs.get("canny_threshold2", None)
+        morph_kernel_size = kwargs.get("morph_kernel_size", 5)
+        # Lower default to 0.2% of image area to detect smaller roofs in screenshots
+        min_contour_area_ratio = kwargs.get("min_contour_area_ratio", 0.002)
+        max_contour_area_ratio = kwargs.get("max_contour_area_ratio", 0.98)
+        approx_poly_epsilon_factor = kwargs.get("approx_poly_epsilon_factor", 0.02)
+        confidence_score = kwargs.get("confidence_score", 0.9)
+
+        # 1. Grayscale and Blur
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        # Use Canny edge detection
-        edges = cv2.Canny(blurred, 50, 150)
+        blurred = cv2.GaussianBlur(gray, (blur_kernel_size, blur_kernel_size), 0)
 
-        # Find contours
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # 2. Edge Detection (use median-based automatic thresholds if not provided)
+        if canny_threshold1 is None or canny_threshold2 is None:
+            v = float(np.median(blurred))
+            canny_threshold1 = int(max(10, 0.66 * v))
+            canny_threshold2 = int(min(255, 1.33 * v))
+        edges = cv2.Canny(blurred, canny_threshold1, canny_threshold2)
 
-        min_area_threshold = kwargs.get("min_area_threshold", 0.01 * width * height) # 1% of image area
-        confidence_score = kwargs.get("confidence_score", 0.85) # Fixed confidence for placeholder
+        # 3. Morphological Operations to close gaps in edges (closing + dilation)
+        kernel = np.ones((morph_kernel_size, morph_kernel_size), np.uint8)
+        closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+        closed_edges = cv2.dilate(closed, kernel, iterations=1)
+
+        # 4. Find Contours
+        contours, _ = cv2.findContours(closed_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        largest_roof_contour = None
+        max_contour_area = 0.0
 
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area > min_area_threshold:
-                x, y, w, h = cv2.boundingRect(contour)
-                bbox = BoundingBox(x_min=float(x), y_min=float(y), x_max=float(x + w), y_max=float(y + h))
-                
-                # Assign a class based on some simple logic or just a default
-                class_name = "roof_area"
-                if w < width * 0.2 and h < height * 0.2: # Small contours might be openings
-                    class_name = "potential_opening"
+            
+            # Filter by area ratio
+            if not (min_contour_area_ratio * image_area <= area <= max_contour_area_ratio * image_area):
+                continue
 
-                results.append(DetectionResult(
-                    bounding_box=bbox,
-                    confidence=confidence_score,
-                    class_name=class_name,
-                    metadata={"source": "OpenCV Contour Detection", "contour_area": area}
-                ))
+            # Approximate polygon to simplify contour
+            perimeter = cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, approx_poly_epsilon_factor * perimeter, True)
+
+            # We are looking for a closed shape, ideally with more than 3 vertices
+            if len(approx) >= 4: # A roof plane is typically a quadrilateral or more complex polygon
+                # Compute bounding rectangle and fill ratio to exclude very thin or spurious contours
+                rx, ry, rw, rh = cv2.boundingRect(approx)
+                rect_area = float(rw * rh) if (rw > 0 and rh > 0) else 0.0
+                fill_ratio = (area / rect_area) if rect_area > 0 else 0.0
+                # Heuristics: at least 20% fill of bounding rect and larger area than previous
+                if fill_ratio >= 0.20 and area > max_contour_area:
+                    max_contour_area = area
+                    largest_roof_contour = approx
+
+        results: List[DetectionResult] = []
+        if largest_roof_contour is not None:
+            x, y, w, h = cv2.boundingRect(largest_roof_contour)
+            bbox = BoundingBox(x_min=float(x), y_min=float(y), x_max=float(x + w), y_max=float(y + h))
+            
+            results.append(DetectionResult(
+                bounding_box=bbox,
+                confidence=confidence_score,
+                class_name="roof_area",
+                metadata={"source": "OpenCV Roof Detection", "contour_area": max_contour_area}
+            ))
+            logger.info(f"Detected largest roof area with bounding box: {bbox}")
+        else:
+            logger.info("No suitable roof-like contour found.")
         
-        logger.info(f"Simulated detection completed. Found {len(results)} objects.")
         return results
 
     def get_model_info(self) -> Dict[str, Any]:
         """
-        Returns detailed information about this placeholder model.
+        Returns detailed information about this detector.
         """
         return self._model_info
 
