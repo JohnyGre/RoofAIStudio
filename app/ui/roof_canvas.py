@@ -9,7 +9,7 @@ import cv2 # For converting mask to QImage
 
 from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QWidget, QSizePolicy,
-    QGraphicsEllipseItem, QGraphicsLineItem, QGraphicsPolygonItem
+    QGraphicsEllipseItem, QGraphicsLineItem, QGraphicsPolygonItem, QGraphicsSimpleTextItem, QGraphicsItem
 )
 from PySide6.QtGui import QPixmap, QTransform, QMouseEvent, QWheelEvent, QPen, QBrush, QColor, QImage, QPolygonF, QPainter
 from PySide6.QtCore import Qt, Signal, QPointF, QRectF
@@ -19,6 +19,36 @@ from app.geometry.point import Point2D
 from app.geometry.polygon import Polygon2D
 from app.ai.segmentation_result import SegmentationResult
 from app.ai.ai_result import DetectionResult, BoundingBox
+
+class DraggableVertexItem(QGraphicsEllipseItem):
+    """
+    Small draggable vertex item used for AI overlay. Stores an index and notifies
+    parent RoofCanvas on position changes via the canvas signal.
+    """
+    def __init__(self, index: int, pos: QPointF, size: float, canvas: 'RoofCanvas'):
+        # Create ellipse centered at (0,0); use setPos to place it at scene coords
+        super().__init__(-size/2, -size/2, size, size)
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemSendsScenePositionChanges, True)
+        self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
+        self._index = index
+        self._canvas = canvas
+        # Visual style
+        self.setPen(canvas._point_pen)
+        self.setBrush(canvas._point_brush)
+        # Place at scene position
+        self.setPos(pos)
+
+    def itemChange(self, change, value):
+        from PySide6.QtWidgets import QGraphicsItem
+        if change == QGraphicsItem.ItemPositionHasChanged:
+            try:
+                # Emit index and new scene position
+                self._canvas.ai_overlay_vertex_moved.emit(self._index, self.scenePos())
+            except Exception:
+                pass
+        return super().itemChange(change, value)
+
 
 class RoofCanvas(QGraphicsView):
     """
@@ -40,6 +70,9 @@ class RoofCanvas(QGraphicsView):
     point_moved_in_drawing = Signal(int, QPointF)
     polygon_drawing_finished = Signal()
     drawing_mode_changed = Signal(bool)
+
+    # New signal for AI overlay vertex moves: emits (index, scene QPointF)
+    ai_overlay_vertex_moved = Signal(int, QPointF)
 
     # New signal for calibration
     calibration_points_selected = Signal(Point2D, Point2D) # Emits two pixel points
@@ -84,6 +117,13 @@ class RoofCanvas(QGraphicsView):
         # AI Overlay variables
         self._ai_overlay_active: bool = False
         self._ai_overlay_items: List[Union[QGraphicsPolygonItem, QGraphicsPixmapItem, QGraphicsRectItem]] = [] # Added QGraphicsRectItem
+        # Polygon overlay and draggable vertices
+        self._ai_polygon_item: Optional[QGraphicsPolygonItem] = None
+        self._ai_vertex_items: List[DraggableVertexItem] = []
+        self._ai_vertex_label_items: List[QGraphicsSimpleTextItem] = []
+        self._current_ai_polygon_points: List[QPointF] = []
+        # Connect internal overlay move signal to handler
+        self.ai_overlay_vertex_moved.connect(self._on_ai_overlay_vertex_moved)
 
         # Drawing styles
         self._point_pen = QPen(QColor(255, 0, 0), 2)
@@ -283,6 +323,44 @@ class RoofCanvas(QGraphicsView):
             self.scene.addItem(line_item)
             self._calibration_line_item = line_item
 
+    def update_ai_overlay_visuals(self) -> None:
+        """
+        Updates vertex marker sizes and label positions according to current zoom level.
+        """
+        if not self._ai_polygon_item or not self._ai_vertex_items:
+            return
+        point_size = max(4.0, 8.0 / max(0.1, self._zoom_factor))
+        for v in self._ai_vertex_items:
+            # keep center at same scene position, adjust rect to new size
+            scene_pos = v.scenePos()
+            v.setRect(-point_size/2, -point_size/2, point_size, point_size)
+            v.setPos(scene_pos)
+        for i, label in enumerate(self._ai_vertex_label_items):
+            if i < len(self._ai_vertex_items):
+                v = self._ai_vertex_items[i]
+                scene_pos = v.scenePos()
+                label.setPos(scene_pos + QPointF(6.0 / max(0.1, self._zoom_factor), -12.0 / max(0.1, self._zoom_factor)))
+
+    def _on_ai_overlay_vertex_moved(self, index: int, scene_pos: QPointF) -> None:
+        """
+        Internal handler when a vertex is moved by user. Update polygon visual immediately.
+        """
+        if not (0 <= index < len(self._current_ai_polygon_points)):
+            return
+        # Update point
+        self._current_ai_polygon_points[index] = scene_pos
+        # Update polygon item
+        if self._ai_polygon_item:
+            try:
+                new_poly = QPolygonF(self._current_ai_polygon_points)
+                self._ai_polygon_item.setPolygon(new_poly)
+            except Exception:
+                pass
+        # Update label position
+        if index < len(self._ai_vertex_label_items):
+            label = self._ai_vertex_label_items[index]
+            label.setPos(scene_pos + QPointF(6.0 / max(0.1, self._zoom_factor), -12.0 / max(0.1, self._zoom_factor)))
+
     def clear_calibration_visuals(self) -> None:
         """
         Removes all calibration drawing items from the scene.
@@ -340,20 +418,81 @@ class RoofCanvas(QGraphicsView):
 
             elif isinstance(result, DetectionResult):
                 bbox = result.bounding_box
-                rect = QRectF(bbox.x_min, bbox.y_min, bbox.width, bbox.height)
-                rect_item = self.scene.addRect(rect, self._detection_box_pen)
-                self._ai_overlay_items.append(rect_item)
+                # If polygon vertices present in metadata, use polygon overlay with draggable vertices
+                polygon_pts = None
+                if isinstance(result.metadata, dict) and result.metadata.get("contour_polygon"):
+                    polygon_pts = result.metadata.get("contour_polygon")
+
+                if polygon_pts:
+                    qpoints = [QPointF(float(x), float(y)) for (x, y) in polygon_pts]
+                    self._current_ai_polygon_points = qpoints
+                    qpoly = QPolygonF(qpoints)
+                    polygon_item = QGraphicsPolygonItem(qpoly)
+                    polygon_item.setPen(self._contour_pen)
+                    polygon_item.setBrush(Qt.NoBrush)
+                    self.scene.addItem(polygon_item)
+                    polygon_item.setZValue(1)
+                    self._ai_overlay_items.append(polygon_item)
+                    self._ai_polygon_item = polygon_item
+
+                    # Create draggable vertex items and labels
+                    point_size = 8 / self._zoom_factor
+                    for i, qp in enumerate(qpoints):
+                        v_item = DraggableVertexItem(i, qp, point_size, self)
+                        v_item.setZValue(2)
+                        self.scene.addItem(v_item)
+                        self._ai_vertex_items.append(v_item)
+
+                        label = QGraphicsSimpleTextItem(str(i+1))
+                        label.setBrush(QBrush(QColor(255, 255, 255)))
+                        label.setZValue(3)
+                        label.setPos(qp + QPointF(6/ self._zoom_factor, -12/ self._zoom_factor))
+                        self.scene.addItem(label)
+                        self._ai_vertex_label_items.append(label)
+
+                else:
+                    rect = QRectF(bbox.x_min, bbox.y_min, bbox.width, bbox.height)
+                    rect_item = self.scene.addRect(rect, self._detection_box_pen)
+                    self._ai_overlay_items.append(rect_item)
 
         for item in self._ai_overlay_items:
             item.setZValue(1)
+        # Ensure vertex items and labels have proper Z
+        for v in self._ai_vertex_items:
+            v.setZValue(2)
+        for l in self._ai_vertex_label_items:
+            l.setZValue(3)
 
     def clear_ai_overlay_visuals(self) -> None:
         """
         Removes all AI overlay items from the scene.
         """
         for item in self._ai_overlay_items:
-            self.scene.removeItem(item)
+            try:
+                self.scene.removeItem(item)
+            except Exception:
+                pass
         self._ai_overlay_items.clear()
+        # Remove polygon and vertex items if present
+        if self._ai_polygon_item:
+            try:
+                self.scene.removeItem(self._ai_polygon_item)
+            except Exception:
+                pass
+            self._ai_polygon_item = None
+        for v in self._ai_vertex_items:
+            try:
+                self.scene.removeItem(v)
+            except Exception:
+                pass
+        self._ai_vertex_items.clear()
+        for l in self._ai_vertex_label_items:
+            try:
+                self.scene.removeItem(l)
+            except Exception:
+                pass
+        self._ai_vertex_label_items.clear()
+        self._current_ai_polygon_points.clear()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         """
@@ -385,6 +524,11 @@ class RoofCanvas(QGraphicsView):
 
         self.update_drawing_visuals(self._get_current_drawing_points_from_items())
         self.update_calibration_visuals() # Update calibration visuals on zoom
+        # Update AI overlay visuals (vertex size and labels)
+        try:
+            self.update_ai_overlay_visuals()
+        except Exception:
+            pass
 
     def _get_current_drawing_points_from_items(self) -> List[Point2D]:
         """Helper to get Point2D list from current drawing items."""
