@@ -74,12 +74,25 @@ class GeometryConverter:
 
         for dr in detection_results:
             bbox = dr.bounding_box
-            # Convert bounding box corners to Point2D
-            p1_2d = Point2D(bbox.x_min, bbox.y_min)
-            p2_2d = Point2D(bbox.x_max, bbox.y_min)
-            p3_2d = Point2D(bbox.x_max, bbox.y_max)
-            p4_2d = Point2D(bbox.x_min, bbox.y_max)
-            bbox_polygon_2d = Polygon2D(vertices=[p1_2d, p2_2d, p3_2d, p4_2d])
+            # If the detector provided polygon vertices in metadata, use them for higher-precision geometry
+            polygon_pts = None
+            if isinstance(dr.metadata, dict) and dr.metadata.get("contour_polygon"):
+                try:
+                    polygon_pts = dr.metadata.get("contour_polygon")
+                except Exception:
+                    polygon_pts = None
+
+            if polygon_pts:
+                # polygon_pts expected as list of (x, y) pairs
+                polygon_vertices = [Point2D(float(x), float(y)) for (x, y) in polygon_pts]
+                bbox_polygon_2d = Polygon2D(vertices=polygon_vertices)
+            else:
+                # Fallback to bounding box polygon
+                p1_2d = Point2D(bbox.x_min, bbox.y_min)
+                p2_2d = Point2D(bbox.x_max, bbox.y_min)
+                p3_2d = Point2D(bbox.x_max, bbox.y_max)
+                p4_2d = Point2D(bbox.x_min, bbox.y_max)
+                bbox_polygon_2d = Polygon2D(vertices=[p1_2d, p2_2d, p3_2d, p4_2d])
 
             # If calibration is provided, convert 2D pixel points to real-world meters
             # For simplicity, we'll assume the Polygon2D's area/perimeter methods
