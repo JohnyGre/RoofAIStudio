@@ -52,9 +52,18 @@ class CoreAIPipeline:
         if resized_image is None:
             raise ValueError("Image preprocessing (resize) failed.")
 
-        # Example: Normalize pixel values (e.g., 0-255 to 0-1)
-        normalized_image = resized_image.astype(np.float32) / 255.0
-        return normalized_image
+        # By default, return uint8 BGR resized image so OpenCV-based models can operate on CV_8U data.
+        # If normalization is explicitly requested (e.g., for DL models), pass preprocess_params={'normalize': True}.
+        if kwargs.get("normalize", False):
+            normalized_image = resized_image.astype(np.float32) / 255.0
+            return normalized_image
+        else:
+            # Ensure dtype is uint8 for OpenCV operations
+            if resized_image.dtype != np.uint8:
+                preprocessed_uint8 = (np.clip(resized_image, 0, 255)).astype(np.uint8)
+            else:
+                preprocessed_uint8 = resized_image
+            return preprocessed_uint8
 
     def _inference(self, preprocessed_data: Any, **kwargs) -> Any:
         """
