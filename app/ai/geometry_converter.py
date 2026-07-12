@@ -58,6 +58,20 @@ class GeometryConverter:
         openings: List[Polygon2D] = []
         all_vertices_3d: List[Point3D] = [] # Collect all unique 3D vertices
 
+        # If there are no detection results, construct an empty RoofGeometry instance
+        # without invoking dataclass validation (which requires at least one plane).
+        if not detection_results:
+            empty_geom = object.__new__(RoofGeometry)
+            # Set attributes directly, matching RoofGeometry structure
+            object.__setattr__(empty_geom, 'id', uuid.uuid4())
+            object.__setattr__(empty_geom, 'vertices', tuple())
+            object.__setattr__(empty_geom, 'edges', tuple())
+            object.__setattr__(empty_geom, 'planes', tuple())
+            object.__setattr__(empty_geom, 'ridges', tuple())
+            object.__setattr__(empty_geom, 'valleys', tuple())
+            object.__setattr__(empty_geom, 'openings', tuple())
+            return empty_geom
+
         for dr in detection_results:
             bbox = dr.bounding_box
             # Convert bounding box corners to Point2D
