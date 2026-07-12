@@ -155,7 +155,8 @@ class MainWindow(QMainWindow):
         self.image_controller.image_cleared.connect(self.workspace.roof_canvas.clear_canvas)
         self.image_controller.error_occurred.connect(self.status_bar.set_status_message)
         self.image_controller.status_message.connect(self.status_bar.set_status_message)
-        self.image_controller.image_loaded.connect(self.ai_controller.set_current_image)
+        # Forward QPixmap to UI, but pass the raw OpenCV NumPy image to AIController
+        self.image_controller.image_loaded.connect(lambda pixmap, info: self.ai_controller.set_current_image(self.image_controller.current_image_data, info))
 
         # RoofCanvas Signals
         self.workspace.roof_canvas.image_displayed.connect(self._on_image_displayed_on_canvas)
