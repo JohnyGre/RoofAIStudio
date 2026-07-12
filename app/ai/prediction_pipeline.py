@@ -136,6 +136,12 @@ class RoofAnalysisPipeline:
                 logger.warning("Mixed or unsupported AI result types. Returning empty results.")
                 raise TypeError("Unsupported or mixed AI result types for geometry conversion.")
 
+        # If no roof planes were detected, skip strict validation and return empty results gracefully.
+        # This allows the UI to show "no results" instead of treating it as an internal error.
+        if hasattr(roof_geometry, "planes") and len(getattr(roof_geometry, "planes") or []) == 0:
+            logger.info("No roof planes detected by AI pipeline; returning empty results without raising validation error.")
+            return roof_geometry, raw_ai_results
+
         self._validate_output(roof_geometry)
         logger.info("Roof analysis completed successfully.")
         return roof_geometry, raw_ai_results
