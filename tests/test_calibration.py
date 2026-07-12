@@ -64,3 +64,22 @@ class TestCalibrationService:
     def test_convert_unit_unsupported(self):
         with pytest.raises(ValueError, match="Unsupported unit conversion"):
             CalibrationService.convert_unit(1.0, "m", "inch")
+
+    # New tests for CalibrationModel validation
+    def test_calibration_model_invalid_distance(self):
+        with pytest.raises(ValueError, match="Reference distance must be positive"):
+            CalibrationModel(
+                reference_points_pixel=(Point2D(0,0), Point2D(100,0)),
+                reference_distance_meters=0.0,
+                scale_factor_pixels_per_meter=100.0,
+                unit="m"
+            )
+
+    def test_calibration_model_invalid_scale_factor(self):
+        with pytest.raises(ValueError, match="Scale factor must be positive"):
+            CalibrationModel(
+                reference_points_pixel=(Point2D(0,0), Point2D(100,0)),
+                reference_distance_meters=1.0,
+                scale_factor_pixels_per_meter=0.0,
+                unit="m"
+            )

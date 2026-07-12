@@ -2,6 +2,7 @@
 This module defines the MenuBar for the Roof AI Studio application.
 """
 
+from typing import Optional
 from PySide6.QtWidgets import QMenuBar, QMenu
 from PySide6.QtCore import Signal
 
@@ -28,6 +29,7 @@ class MenuBar(QMenuBar):
     # Tools Menu Signals
     geometry_editor_triggered = Signal()
     materials_triggered = Signal()
+    calibrate_image_triggered = Signal() # New signal for calibration
 
     # Help Menu Signals
     about_triggered = Signal()
@@ -40,7 +42,9 @@ class MenuBar(QMenuBar):
             parent (QWidget, optional): The parent widget. Defaults to None.
         """
         super().__init__(parent)
-        self._file_menu: Optional[QMenu] = None # Initialize _file_menu
+        self._file_menu: Optional[QMenu] = None
+        self._ai_menu: Optional[QMenu] = None
+        self._tools_menu: Optional[QMenu] = None # Initialize _tools_menu
         self._create_menus()
 
     @property
@@ -51,6 +55,24 @@ class MenuBar(QMenuBar):
         if self._file_menu is None:
             raise RuntimeError("File menu has not been created yet.")
         return self._file_menu
+
+    @property
+    def ai_menu(self) -> QMenu:
+        """
+        Returns the 'AI' QMenu object.
+        """
+        if self._ai_menu is None:
+            raise RuntimeError("AI menu has not been created yet.")
+        return self._ai_menu
+    
+    @property
+    def tools_menu(self) -> QMenu:
+        """
+        Returns the 'Tools' QMenu object.
+        """
+        if self._tools_menu is None:
+            raise RuntimeError("Tools menu has not been created yet.")
+        return self._tools_menu
 
     def _create_menus(self) -> None:
         """
@@ -66,7 +88,7 @@ class MenuBar(QMenuBar):
         """
         Creates the 'File' menu and its actions.
         """
-        self._file_menu = self.addMenu("&File") # Assign the created menu
+        self._file_menu = self.addMenu("&File")
         
         new_project_action = self._file_menu.addAction("New Project")
         new_project_action.triggered.connect(self.new_project_triggered)
@@ -100,25 +122,29 @@ class MenuBar(QMenuBar):
         """
         Creates the 'AI' menu and its actions.
         """
-        ai_menu = self.addMenu("&AI")
+        self._ai_menu = self.addMenu("&AI")
 
-        analyze_roof_action = ai_menu.addAction("Analyze Roof")
+        analyze_roof_action = self._ai_menu.addAction("Analyze Roof")
         analyze_roof_action.triggered.connect(self.analyze_roof_triggered)
 
-        ai_models_action = ai_menu.addAction("AI Models")
+        ai_models_action = self._ai_menu.addAction("AI Models")
         ai_models_action.triggered.connect(self.ai_models_triggered)
 
     def _create_tools_menu(self) -> None:
         """
         Creates the 'Tools' menu and its actions.
         """
-        tools_menu = self.addMenu("&Tools")
+        self._tools_menu = self.addMenu("&Tools") # Assign the created menu
 
-        geometry_editor_action = tools_menu.addAction("Geometry Editor")
+        geometry_editor_action = self._tools_menu.addAction("Geometry Editor")
         geometry_editor_action.triggered.connect(self.geometry_editor_triggered)
 
-        materials_action = tools_menu.addAction("Materials")
+        materials_action = self._tools_menu.addAction("Materials")
         materials_action.triggered.connect(self.materials_triggered)
+
+        self._tools_menu.addSeparator() # Separator before calibration
+        calibrate_action = self._tools_menu.addAction("Calibrate Image...")
+        calibrate_action.triggered.connect(self.calibrate_image_triggered)
 
     def _create_help_menu(self) -> None:
         """

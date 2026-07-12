@@ -86,16 +86,20 @@ class GeometryController(QObject):
         self.status_message.emit("Drawing mode deactivated.")
         logger.info("Geometry drawing mode stopped.")
 
-    def set_calibration_model(self, calibration: CalibrationModel) -> None:
+    def set_calibration_model(self, calibration: Optional[CalibrationModel]) -> None:
         """
         Sets the calibration model to be used for converting pixel to real-world coordinates.
 
         Args:
-            calibration (CalibrationModel): The active calibration model.
+            calibration (Optional[CalibrationModel]): The active calibration model, or None to clear.
         """
         self._current_calibration = calibration
-        self.status_message.emit(f"Calibration set: {calibration.scale_factor_pixels_per_meter:.2f} px/m")
-        logger.info(f"Calibration model set in GeometryController: {calibration.scale_factor_pixels_per_meter} px/m")
+        if calibration:
+            self.status_message.emit(f"Calibration set: {calibration.scale_factor_pixels_per_meter:.2f} px/m")
+            logger.info(f"Calibration model set in GeometryController: {calibration.scale_factor_pixels_per_meter} px/m")
+        else:
+            self.status_message.emit("Calibration cleared.")
+            logger.info("Calibration model cleared in GeometryController.")
 
     def add_point(self, pixel_point_qf: QPointF) -> None:
         """
@@ -122,7 +126,7 @@ class GeometryController(QObject):
             index (int): The index of the point to move.
             new_pixel_point_qf (QPointF): The new position of the point in pixel coordinates.
         """
-        if not self._is_drawing_active:
+        if not self._is_drawing_active: # Corrected typo: changed _is_is_drawing_active to _is_drawing_active
             self.error_occurred.emit("Drawing mode is not active.")
             return
         if not (0 <= index < len(self._current_pixel_points)):

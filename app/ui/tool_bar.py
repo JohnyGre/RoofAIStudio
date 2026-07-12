@@ -19,6 +19,7 @@ class ToolBar(QToolBar):
     analyze_triggered = Signal()
     measure_triggered = Signal()
     export_triggered = Signal()
+    calibrate_triggered = Signal() # New signal for calibration
 
     def __init__(self, parent=None):
         """
@@ -78,6 +79,14 @@ class ToolBar(QToolBar):
         measure_button.setToolTip("Activate Measurement Tools")
         measure_button.clicked.connect(self.measure_triggered)
         self.addWidget(measure_button)
+
+        # Calibrate Image
+        calibrate_button = QToolButton(self)
+        calibrate_button.setIcon(QIcon(":/icons/calibrate.png")) # Placeholder icon
+        calibrate_button.setText("Calibrate")
+        calibrate_button.setToolTip("Calibrate Image Scale")
+        calibrate_button.clicked.connect(self.calibrate_triggered)
+        self.addWidget(calibrate_button)
 
         self.addSeparator()
 

@@ -69,14 +69,20 @@ class AIController(QObject):
         self._current_image_info = image_info
         logger.debug(f"AIController received image: {image_info.file_path.name}")
 
-    def set_calibration_model(self, calibration: CalibrationModel) -> None:
+    def set_calibration_model(self, calibration: Optional[CalibrationModel]) -> None:
         """
         Sets the current calibration model for real-world conversions.
+
+        Args:
+            calibration (Optional[CalibrationModel]): The active calibration model, or None to clear.
         """
         self._current_calibration = calibration
-        logger.debug(f"AIController received calibration: {calibration.scale_factor_pixels_per_meter:.2f} px/m")
+        if calibration:
+            logger.debug(f"AIController received calibration: {calibration.scale_factor_pixels_per_meter:.2f} px/m")
+        else:
+            logger.debug("AIController calibration cleared.")
 
-    def analyze_roof(self, model_name: str = YOLOSegmentationModel.DEFAULT_MODEL_NAME) -> None:
+    def analyze_roof(self, model_name: str = RoofDetector.MODEL_NAME) -> None: # Changed default model to RoofDetector.MODEL_NAME
         """
         Starts the AI-driven roof analysis process.
 

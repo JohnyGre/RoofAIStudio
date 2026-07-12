@@ -4,7 +4,7 @@ This module defines the main application window for Roof AI Studio.
 
 from pathlib import Path
 from typing import List, Union
-from PySide6.QtWidgets import QMainWindow, QFileDialog, QMessageBox, QToolButton, QMenu
+from PySide6.QtWidgets import QMainWindow, QFileDialog, QMessageBox, QToolButton, QMenu, QInputDialog # Added QInputDialog
 from PySide6.QtCore import Qt, QPointF
 from PySide6.QtGui import QIcon
 
@@ -16,14 +16,15 @@ from app.ui.styles import DarkTheme
 from app.ui.workspace import Workspace
 from app.controllers.image_controller import ImageController
 from app.controllers.geometry_controller import GeometryController
-from app.controllers.ai_controller import AIController # New import
+from app.controllers.ai_controller import AIController
 from app.core.image.image_model import ImageInfo
 from app.geometry.calibration import CalibrationModel, CalibrationService
 from app.materials.material_repository import SQLAlchemyMaterialRepository
 from app.database.session import get_db_session
 from app.materials.calculation_result import MaterialCalculationResult
-from app.geometry.roof_geometry import RoofGeometry # New import
-from app.ai.ai_result import DetectionResult, SegmentationResult # New import
+from app.geometry.roof_geometry import RoofGeometry
+from app.ai.ai_result import DetectionResult, SegmentationResult
+from app.geometry.point import Point2D # Added import for Point2D
 
 class MainWindow(QMainWindow):
     """
@@ -82,12 +83,13 @@ class MainWindow(QMainWindow):
         open_image_action.triggered.connect(self._on_open_image)
 
         # Add AI Overlay toggle to AI menu
-        self.menu_bar.ai_menu = self.menu_bar.findChild(QMenu, "AI") # Access the AI menu
         if self.menu_bar.ai_menu:
             self.ai_overlay_action = self.menu_bar.ai_menu.addAction("Toggle AI Overlay")
             self.ai_overlay_action.setCheckable(True)
             self.ai_overlay_action.setChecked(False) # Default to off
             self.ai_overlay_action.triggered.connect(self._on_toggle_ai_overlay)
+        else:
+            print("Warning: AI menu not found in MenuBar.")
 
 
     def _create_tool_bar(self) -> None:
@@ -128,12 +130,13 @@ class MainWindow(QMainWindow):
         self.menu_bar.project_settings_triggered.connect(self._on_project_settings)
 
         # AI Menu
-        self.menu_bar.analyze_roof_triggered.connect(self._on_analyze_roof_action) # Connect to new slot
+        self.menu_bar.analyze_roof_triggered.connect(self._on_analyze_roof_action)
         self.menu_bar.ai_models_triggered.connect(self._on_ai_models)
 
         # Tools Menu
         self.menu_bar.geometry_editor_triggered.connect(self._on_geometry_editor_action)
         self.menu_bar.materials_triggered.connect(self._on_materials)
+        self.menu_bar.calibrate_image_triggered.connect(self._on_calibrate_image_action) # Connect new menu action
 
         # Help Menu
         self.menu_bar.about_triggered.connect(self._on_about)
@@ -142,8 +145,9 @@ class MainWindow(QMainWindow):
         self.tool_bar.new_triggered.connect(self._on_new_project)
         self.tool_bar.open_triggered.connect(self._on_open_project)
         self.tool_bar.save_triggered.connect(self._on_save_project)
-        self.tool_bar.analyze_triggered.connect(self._on_analyze_roof_action) # Connect toolbar analyze to new slot
+        self.tool_bar.analyze_triggered.connect(self._on_analyze_roof_action)
         self.tool_bar.measure_triggered.connect(self._on_measure)
+        self.tool_bar.calibrate_triggered.connect(self._on_calibrate_image_action) # Connect new toolbar action
         self.tool_bar.export_triggered.connect(self._on_export_pdf)
 
         # ImageController Signals
@@ -151,7 +155,7 @@ class MainWindow(QMainWindow):
         self.image_controller.image_cleared.connect(self.workspace.roof_canvas.clear_canvas)
         self.image_controller.error_occurred.connect(self.status_bar.set_status_message)
         self.image_controller.status_message.connect(self.status_bar.set_status_message)
-        self.image_controller.image_loaded.connect(self.ai_controller.set_current_image) # Pass image to AIController
+        self.image_controller.image_loaded.connect(self.ai_controller.set_current_image)
 
         # RoofCanvas Signals
         self.workspace.roof_canvas.image_displayed.connect(self._on_image_displayed_on_canvas)
@@ -160,6 +164,7 @@ class MainWindow(QMainWindow):
         self.workspace.roof_canvas.point_moved_in_drawing.connect(self.geometry_controller.move_point)
         self.workspace.roof_canvas.polygon_drawing_finished.connect(self.geometry_controller.finalize_polygon)
         self.workspace.roof_canvas.drawing_mode_changed.connect(self._on_drawing_mode_changed)
+        self.workspace.roof_canvas.calibration_points_selected.connect(self._on_calibration_points_selected) # Connect new signal
 
         # GeometryController Signals
         self.geometry_controller.polygon_drawing_updated.connect(self.workspace.roof_canvas.update_drawing_visuals)
@@ -169,7 +174,6 @@ class MainWindow(QMainWindow):
         self.geometry_controller.roof_geometry_created.connect(self._on_roof_geometry_created)
         self.geometry_controller.measurements_calculated.connect(self._on_measurements_calculated)
         self.geometry_controller.materials_calculated.connect(self._on_materials_calculated)
-        self.geometry_controller.status_message.connect(self.ai_controller.set_calibration_model) # Pass calibration to AIController
 
         # AIController Signals
         self.ai_controller.analysis_started.connect(lambda: self.status_bar.set_status_message("AI Analysis in progress..."))
@@ -211,8 +215,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No Calibration Set", "Please set calibration (e.g., by loading an image) before performing AI analysis.")
             return
 
-        # For now, hardcode the YOLO model name. In future, this could be a user selection.
-        self.ai_controller.analyze_roof(model_name="YOLO_Segmentation_Adapter")
+        # Use AIController's default model selection (will use registered RoofDetector by default)
+        self.ai_controller.analyze_roof()
         print("Analyze Roof triggered.")
 
     def _on_ai_models(self) -> None:
@@ -237,6 +241,62 @@ class MainWindow(QMainWindow):
             self.workspace.roof_canvas.set_drawing_mode(True)
         print(f"Geometry Editor triggered. Drawing mode active: {self.geometry_controller.is_drawing_active}")
 
+    def _on_calibrate_image_action(self) -> None:
+        """
+        Slot to handle the "Calibrate Image" menu/toolbar action.
+        Activates the calibration mode on the canvas.
+        """
+        if self.image_controller.current_image_data is None:
+            QMessageBox.warning(self, "No Image Loaded", "Please load an image first to calibrate.")
+            return
+        
+        # Deactivate other modes
+        self.geometry_controller.stop_drawing()
+        self.workspace.roof_canvas.set_drawing_mode(False)
+
+        # Activate calibration mode
+        self.workspace.roof_canvas.set_calibration_mode(True)
+        self.status_bar.set_status_message("Calibration mode active. Click two points on the image to define a known distance.")
+        print("Calibrate Image triggered. Calibration mode active.")
+
+    def _on_calibration_points_selected(self, p1_pixel: Point2D, p2_pixel: Point2D) -> None:
+        """
+        Slot to handle the selection of two calibration points on the canvas.
+        Prompts user for real-world distance and creates CalibrationModel.
+        """
+        self.status_bar.set_status_message("Two calibration points selected. Enter real-world distance.")
+        print(f"Calibration points selected: {p1_pixel}, {p2_pixel}")
+
+        # Prompt user for real-world distance
+        # QInputDialog.getDouble in PySide6 may not accept keyword arguments; use positional args:
+        # (parent, title, label, value=1.0, min=0.01, max=10000.0, decimals=2)
+        distance_meters, ok = QInputDialog.getDouble(
+            self,
+            "Enter Real-World Distance",
+            "Enter the real-world distance (in meters) between the two selected points:",
+            1.0,  # default value (meters)
+            0.01,  # min
+            10000.0,  # max
+            2  # decimals
+        )
+
+        if ok and distance_meters > 0:
+            try:
+                calibration = CalibrationService.calibrate_from_distance(
+                    p1_pixel, p2_pixel, distance_meters
+                )
+                self.geometry_controller.set_calibration_model(calibration)
+                self.ai_controller.set_calibration_model(calibration)
+                self.status_bar.set_status_message(f"Calibration successful: {calibration.scale_factor_pixels_per_meter:.2f} px/m.")
+                print(f"Calibration successful: {calibration}")
+            except ValueError as e:
+                self.status_bar.set_status_message(f"Calibration failed: {e}")
+                QMessageBox.critical(self, "Calibration Error", f"Failed to calibrate: {e}")
+        else:
+            self.status_bar.set_status_message("Calibration cancelled or invalid distance entered.")
+            QMessageBox.warning(self, "Calibration Cancelled", "Calibration was cancelled or an invalid distance was entered.")
+        
+        self.workspace.roof_canvas.set_calibration_mode(False) # Deactivate calibration mode
 
     def _on_materials(self) -> None:
         self.status_bar.set_status_message("Action: Materials")
@@ -273,21 +333,11 @@ class MainWindow(QMainWindow):
         self.status_bar.set_status_message(f"Image '{image_info.file_path.name}' loaded. Dimensions: {image_info.width}x{image_info.height}")
         print(f"Image displayed: {image_info.file_path.name}")
 
-        # Placeholder calibration: 100 pixels = 1 meter
-        # In a real scenario, this would come from user input or metadata
-        placeholder_p1 = Point2D(0.0, 0.0)
-        placeholder_p2 = Point2D(100.0, 0.0) # 100 pixels
-        placeholder_distance_meters = 1.0 # 1 meter
-        try:
-            calibration = CalibrationService.calibrate_from_distance(
-                placeholder_p1, placeholder_p2, placeholder_distance_meters
-            )
-            self.geometry_controller.set_calibration_model(calibration)
-            self.ai_controller.set_calibration_model(calibration) # Pass calibration to AIController
-            self.status_bar.set_status_message(f"Image loaded. Placeholder calibration set: {calibration.scale_factor_pixels_per_meter:.2f} px/m.")
-        except ValueError as e:
-            self.status_bar.set_status_message(f"Error setting placeholder calibration: {e}")
-            QMessageBox.critical(self, "Calibration Error", f"Failed to set placeholder calibration: {e}")
+        # Placeholder calibration is removed, now user must calibrate manually
+        self.status_bar.set_status_message(f"Image loaded. Please calibrate the image using 'Calibrate Image' tool.")
+        # Clear any previous calibration in controllers
+        self.geometry_controller.set_calibration_model(None)
+        self.ai_controller.set_calibration_model(None)
 
 
     def _on_image_cleared_from_canvas(self) -> None:
@@ -296,9 +346,10 @@ class MainWindow(QMainWindow):
         Updates the status bar and clears drawing visuals.
         """
         self.status_bar.set_status_message("Canvas cleared.")
-        self.geometry_controller.clear_drawing() # Clear any active drawing
-        self.workspace.roof_canvas.set_drawing_mode(False) # Ensure drawing mode is off
-        self.workspace.roof_canvas.clear_ai_overlay_visuals() # Clear AI overlay
+        self.geometry_controller.clear_drawing()
+        self.workspace.roof_canvas.set_drawing_mode(False)
+        self.workspace.roof_canvas.set_calibration_mode(False) # Ensure calibration mode is off
+        self.workspace.roof_canvas.clear_ai_overlay_visuals()
         print("Image cleared from canvas.")
 
     def _on_drawing_mode_changed(self, active: bool) -> None:
@@ -314,7 +365,6 @@ class MainWindow(QMainWindow):
         """
         self.status_bar.set_status_message(f"Roof Geometry created. Total area: {roof_geometry.calculate_total_area():.2f} sq m.")
         print(f"Received RoofGeometry: {roof_geometry}")
-        # Here you would typically store the roof_geometry in a project or display its properties.
 
     def _on_measurements_calculated(self, measurements) -> None:
         """
@@ -322,7 +372,6 @@ class MainWindow(QMainWindow):
         """
         self.status_bar.set_status_message(f"Measurements: Total Area = {measurements.total_area_m2:.2f} sq m, Perimeter = {measurements.total_perimeter_m:.2f} m.")
         print(f"Received Measurements: {measurements}")
-        # Future: Display measurements in a dedicated panel
 
     def _on_materials_calculated(self, material_results: List[MaterialCalculationResult]) -> None:
         """
@@ -331,7 +380,6 @@ class MainWindow(QMainWindow):
         total_cost = sum(res.estimated_cost for res in material_results)
         self.status_bar.set_status_message(f"Materials calculated. Total estimated cost: ${total_cost:.2f}")
         print(f"Received Material Calculations: {material_results}")
-        # Future: Display material breakdown in a dedicated panel
 
     def _on_ai_analysis_completed(self, roof_geometry: RoofGeometry, raw_ai_results: List[Union[DetectionResult, SegmentationResult]]) -> None:
         """
@@ -341,8 +389,6 @@ class MainWindow(QMainWindow):
         self.status_bar.set_status_message("AI Analysis completed. Displaying results.")
         self.workspace.roof_canvas.display_ai_results_overlay(raw_ai_results)
         print(f"AI Analysis completed. Generated RoofGeometry: {roof_geometry}")
-        # Optionally, trigger measurement and material calculation from AI-generated geometry
-        # self.geometry_controller.calculate_measurements(roof_geometry)
 
     def _on_toggle_ai_overlay(self, checked: bool) -> None:
         """

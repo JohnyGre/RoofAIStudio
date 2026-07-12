@@ -23,7 +23,7 @@ from app.ai.ai_result import DetectionResult, BoundingBox
 class RoofCanvas(QGraphicsView):
     """
     A custom QGraphicsView for displaying roof images with zoom, pan, and
-    interactive drawing capabilities for roof geometry.
+    interactive drawing capabilities for roof geometry and calibration.
     """
 
     # Signals for general canvas interactions
@@ -41,6 +41,9 @@ class RoofCanvas(QGraphicsView):
     polygon_drawing_finished = Signal()
     drawing_mode_changed = Signal(bool)
 
+    # New signal for calibration
+    calibration_points_selected = Signal(Point2D, Point2D) # Emits two pixel points
+
     def __init__(self, parent: QWidget = None):
         """
         Initializes the RoofCanvas.
@@ -49,10 +52,9 @@ class RoofCanvas(QGraphicsView):
             parent (QWidget, optional): The parent widget. Defaults to None.
         """
         super().__init__(parent)
-        # Use QPainter render hint for antialiasing and smooth pixmap transforms
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setRenderHints(self.renderHints() | QPainter.RenderHint.SmoothPixmapTransform)
-        self.setDragMode(QGraphicsView.DragMode.NoDrag) # Initially no drag, will change for pan
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
 
@@ -73,21 +75,32 @@ class RoofCanvas(QGraphicsView):
         self._selected_point_index: int = -1
         self._is_dragging_point: bool = False
 
+        # Calibration mode variables
+        self._calibration_mode_active: bool = False
+        self._calibration_points: List[QPointF] = []
+        self._calibration_point_items: List[QGraphicsEllipseItem] = []
+        self._calibration_line_item: Optional[QGraphicsLineItem] = None
+
         # AI Overlay variables
         self._ai_overlay_active: bool = False
-        self._ai_overlay_items: List[Union[QGraphicsPolygonItem, QGraphicsPixmapItem]] = []
+        self._ai_overlay_items: List[Union[QGraphicsPolygonItem, QGraphicsPixmapItem, QGraphicsRectItem]] = [] # Added QGraphicsRectItem
 
         # Drawing styles
-        self._point_pen = QPen(QColor(255, 0, 0), 2) # Red outline
-        self._point_brush = QBrush(QColor(255, 0, 0, 150)) # Semi-transparent red fill
-        self._selected_point_brush = QBrush(QColor(0, 255, 0, 150)) # Semi-transparent green fill
-        self._line_pen = QPen(QColor(0, 0, 255), 2) # Blue line
-        self._rubber_band_pen = QPen(QColor(255, 255, 0, 150), 1, Qt.PenStyle.DashLine) # Yellow dashed line
+        self._point_pen = QPen(QColor(255, 0, 0), 2)
+        self._point_brush = QBrush(QColor(255, 0, 0, 150))
+        self._selected_point_brush = QBrush(QColor(0, 255, 0, 150))
+        self._line_pen = QPen(QColor(0, 0, 255), 2)
+        self._rubber_band_pen = QPen(QColor(255, 255, 0, 150), 1, Qt.PenStyle.DashLine)
+
+        # Calibration styles
+        self._calibration_point_pen = QPen(QColor(255, 255, 0), 2) # Yellow outline
+        self._calibration_point_brush = QBrush(QColor(255, 255, 0, 150)) # Semi-transparent yellow fill
+        self._calibration_line_pen = QPen(QColor(255, 255, 0), 2, Qt.PenStyle.DotLine) # Yellow dotted line
 
         # AI Overlay styles
-        self._segmentation_mask_color = QColor(0, 255, 0, 80) # Semi-transparent green
-        self._contour_pen = QPen(QColor(0, 255, 0), 2) # Green contour
-        self._detection_box_pen = QPen(QColor(255, 165, 0), 2) # Orange box
+        self._segmentation_mask_color = QColor(0, 255, 0, 80)
+        self._contour_pen = QPen(QColor(0, 255, 0), 2)
+        self._detection_box_pen = QPen(QColor(255, 165, 0), 2)
 
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -107,16 +120,36 @@ class RoofCanvas(QGraphicsView):
         self.drawing_mode_changed.emit(active)
 
         if active:
-            self.setDragMode(QGraphicsView.DragMode.NoDrag) # Disable panning while drawing
+            self.setDragMode(QGraphicsView.DragMode.NoDrag)
             self.viewport().setCursor(Qt.CursorShape.CrossCursor)
             self.clear_drawing_visuals()
+            self.set_calibration_mode(False) # Deactivate calibration mode if drawing starts
         else:
-            self.setDragMode(QGraphicsView.DragMode.NoDrag) # Reset drag mode
+            self.setDragMode(QGraphicsView.DragMode.NoDrag)
             self.viewport().setCursor(Qt.CursorShape.ArrowCursor)
             if self._rubber_band_line:
                 self.scene.removeItem(self._rubber_band_line)
                 self._rubber_band_line = None
-            self.clear_drawing_visuals() # Clear visuals when exiting drawing mode
+            self.clear_drawing_visuals()
+
+    def set_calibration_mode(self, active: bool) -> None:
+        """
+        Activates or deactivates the interactive calibration mode.
+        """
+        if self._calibration_mode_active == active:
+            return
+        
+        self._calibration_mode_active = active
+        if active:
+            self.setDragMode(QGraphicsView.DragMode.NoDrag)
+            self.viewport().setCursor(Qt.CursorShape.CrossCursor)
+            self.clear_drawing_visuals() # Clear drawing visuals if calibration starts
+            self.clear_calibration_visuals() # Clear previous calibration points
+            self._calibration_points.clear()
+        else:
+            self.setDragMode(QGraphicsView.DragMode.NoDrag)
+            self.viewport().setCursor(Qt.CursorShape.ArrowCursor)
+            self.clear_calibration_visuals()
 
     def set_ai_overlay_mode(self, active: bool) -> None:
         """
@@ -138,10 +171,12 @@ class RoofCanvas(QGraphicsView):
         self.scene.addItem(self._pixmap_item)
         self.scene.setSceneRect(self._pixmap_item.boundingRect())
         self.fit_image_to_view()
-        self._zoom_factor = self.transform().m11() # Update zoom factor based on fit
+        self._zoom_factor = self.transform().m11()
         self._current_image_info = image_info
         self.image_displayed.emit(image_info)
-        self.clear_ai_overlay_visuals() # Clear old AI results when new image is loaded
+        self.clear_ai_overlay_visuals()
+        self.clear_drawing_visuals()
+        self.clear_calibration_visuals()
 
     def clear_canvas(self) -> None:
         """
@@ -151,6 +186,7 @@ class RoofCanvas(QGraphicsView):
         self._pixmap_item = None
         self._current_image_info = None
         self.clear_drawing_visuals()
+        self.clear_calibration_visuals()
         self.clear_ai_overlay_visuals()
         self.image_cleared.emit()
 
@@ -160,7 +196,7 @@ class RoofCanvas(QGraphicsView):
         """
         if self._pixmap_item:
             self.fitInView(self._pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
-            self._zoom_factor = self.transform().m11() # Update zoom factor based on fit
+            self._zoom_factor = self.transform().m11()
             self.zoom_level_changed.emit(self._zoom_factor)
 
     def update_drawing_visuals(self, points: List[Point2D]) -> None:
@@ -171,7 +207,7 @@ class RoofCanvas(QGraphicsView):
         self.clear_drawing_visuals()
 
         # Draw points
-        point_size = 8 / self._zoom_factor # Adjust point size based on zoom
+        point_size = 8 / self._zoom_factor
         for i, p in enumerate(points):
             brush = self._point_brush
             if i == self._selected_point_index:
@@ -223,11 +259,46 @@ class RoofCanvas(QGraphicsView):
         self._selected_point_index = -1
         self._is_dragging_point = False
 
+    def update_calibration_visuals(self) -> None:
+        """
+        Updates the visual representation of calibration points and line.
+        """
+        self.clear_calibration_visuals()
+        if not self._calibration_mode_active or not self._calibration_points:
+            return
+
+        point_size = 8 / self._zoom_factor
+        for i, p in enumerate(self._calibration_points):
+            point_item = QGraphicsEllipseItem(p.x() - point_size/2, p.y() - point_size/2, point_size, point_size)
+            point_item.setPen(self._calibration_point_pen)
+            point_item.setBrush(self._calibration_point_brush)
+            self.scene.addItem(point_item)
+            self._calibration_point_items.append(point_item)
+
+        if len(self._calibration_points) == 2:
+            p1 = self._calibration_points[0]
+            p2 = self._calibration_points[1]
+            line_item = QGraphicsLineItem(p1.x(), p1.y(), p2.x(), p2.y())
+            line_item.setPen(self._calibration_line_pen)
+            self.scene.addItem(line_item)
+            self._calibration_line_item = line_item
+
+    def clear_calibration_visuals(self) -> None:
+        """
+        Removes all calibration drawing items from the scene.
+        """
+        for item in self._calibration_point_items:
+            self.scene.removeItem(item)
+        if self._calibration_line_item:
+            self.scene.removeItem(self._calibration_line_item)
+        self._calibration_point_items.clear()
+        self._calibration_line_item = None
+
     def display_ai_results_overlay(self, ai_results: List[Union[DetectionResult, SegmentationResult]]) -> None:
         """
         Displays AI detection and segmentation results as an overlay on the canvas.
         """
-        self.clear_ai_overlay_visuals() # Clear previous overlays
+        self.clear_ai_overlay_visuals()
 
         if not self._ai_overlay_active:
             return
@@ -235,16 +306,12 @@ class RoofCanvas(QGraphicsView):
         for result in ai_results:
             if isinstance(result, SegmentationResult):
                 if result.mask is not None and result.image_size is not None:
-                    # Ensure mask is the same size as the original image displayed
                     mask_h, mask_w = result.mask.shape[:2]
                     if mask_w != result.image_size[0] or mask_h != result.image_size[1]:
-                        # Resize mask to original image dimensions if necessary
                         mask_display = cv2.resize(result.mask, result.image_size, interpolation=cv2.INTER_NEAREST)
                     else:
                         mask_display = result.mask
 
-                    # Create a QImage from the mask
-                    # Convert binary mask to 3-channel for QImage display
                     mask_colored = np.zeros((mask_display.shape[0], mask_display.shape[1], 4), dtype=np.uint8)
                     mask_colored[mask_display > 0] = [
                         self._segmentation_mask_color.red(),
@@ -260,7 +327,6 @@ class RoofCanvas(QGraphicsView):
                     self.scene.addItem(mask_item)
                     self._ai_overlay_items.append(mask_item)
 
-                    # Optionally, draw contours for segmentation
                     contours, _ = cv2.findContours(mask_display.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                     for contour in contours:
                         if len(contour) >= 3:
@@ -278,9 +344,8 @@ class RoofCanvas(QGraphicsView):
                 rect_item = self.scene.addRect(rect, self._detection_box_pen)
                 self._ai_overlay_items.append(rect_item)
 
-        # Ensure overlay items are above the image
         for item in self._ai_overlay_items:
-            item.setZValue(1) # Set a higher Z-value than the pixmap item (default Z-value is 0)
+            item.setZValue(1)
 
     def clear_ai_overlay_visuals(self) -> None:
         """
@@ -294,17 +359,15 @@ class RoofCanvas(QGraphicsView):
         """
         Handles mouse wheel events for zooming.
         """
-        if not self._pixmap_item: # Only zoom if an image is loaded
+        if not self._pixmap_item:
             super().wheelEvent(event)
             return
 
         zoom_in_factor = 1.15
         zoom_out_factor = 1 / zoom_in_factor
 
-        # Save the current scene position under the mouse
         old_pos = self.mapToScene(event.position().toPoint())
 
-        # Zoom
         if event.angleDelta().y() > 0:
             self.scale(zoom_in_factor, zoom_in_factor)
             self._zoom_factor *= zoom_in_factor
@@ -312,18 +375,16 @@ class RoofCanvas(QGraphicsView):
             self.scale(zoom_out_factor, zoom_out_factor)
             self._zoom_factor *= zoom_out_factor
 
-        # Get the new scene position under the mouse
         new_pos = self.mapToScene(event.position().toPoint())
 
-        # Move scene to keep the old position under the mouse
         delta = new_pos - old_pos
         self.translate(delta.x(), delta.y())
 
         self.zoom_level_changed.emit(self._zoom_factor)
         event.accept()
 
-        # Update point sizes after zoom
         self.update_drawing_visuals(self._get_current_drawing_points_from_items())
+        self.update_calibration_visuals() # Update calibration visuals on zoom
 
     def _get_current_drawing_points_from_items(self) -> List[Point2D]:
         """Helper to get Point2D list from current drawing items."""
@@ -331,14 +392,29 @@ class RoofCanvas(QGraphicsView):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """
-        Handles mouse press events for panning or drawing.
+        Handles mouse press events for panning, drawing or calibration.
         """
         scene_pos = self.mapToScene(event.position().toPoint())
         self.mouse_pressed.emit(scene_pos, event.button())
 
-        if self._drawing_mode_active and self._pixmap_item:
+        if not self._pixmap_item: # No image, no interaction
+            super().mousePressEvent(event)
+            return
+
+        if self._calibration_mode_active:
             if event.button() == Qt.MouseButton.LeftButton:
-                # Check if an existing point is clicked for dragging
+                self._calibration_points.append(scene_pos)
+                self.update_calibration_visuals()
+                if len(self._calibration_points) == 2:
+                    self.calibration_points_selected.emit(
+                        Point2D(self._calibration_points[0].x(), self._calibration_points[0].y()),
+                        Point2D(self._calibration_points[1].x(), self._calibration_points[1].y())
+                    )
+                    self.set_calibration_mode(False) # Exit calibration mode after selecting points
+            return # Consume event in calibration mode
+
+        if self._drawing_mode_active:
+            if event.button() == Qt.MouseButton.LeftButton:
                 self._selected_point_item = None
                 self._selected_point_index = -1
                 for i, item in enumerate(self._current_drawing_points_items):
@@ -347,36 +423,49 @@ class RoofCanvas(QGraphicsView):
                         self._selected_point_index = i
                         self._is_dragging_point = True
                         self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
-                        # Update visual to show selected point
                         self.update_drawing_visuals(self._get_current_drawing_points_from_items())
-                        return # Don't add a new point if dragging existing
+                        return
                 
-                # If no existing point is clicked, add a new one
                 self.point_added_to_drawing.emit(scene_pos)
-                self.viewport().setCursor(Qt.CursorShape.CrossCursor) # Keep cross cursor for adding
-                self._is_dragging_point = False # Ensure not dragging
+                self.viewport().setCursor(Qt.CursorShape.CrossCursor)
+                self._is_dragging_point = False
             elif event.button() == Qt.MouseButton.RightButton:
                 self.polygon_drawing_finished.emit()
-                self.set_drawing_mode(False) # Exit drawing mode after finishing
-        elif self._pixmap_item: # Not in drawing mode, handle panning
-            if event.button() == Qt.MouseButton.LeftButton:
-                self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-                self._last_pan_pos = event.position()
-        super().mousePressEvent(event) # Call super to ensure default behavior for other buttons
+                self.set_drawing_mode(False)
+            return # Consume event in drawing mode
+
+        # Default panning behavior if no other mode is active
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+            self._last_pan_pos = event.position()
+        super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """
-        Handles mouse move events for panning or drawing.
+        Handles mouse move events for panning, drawing or calibration.
         """
         scene_pos = self.mapToScene(event.position().toPoint())
         self.mouse_moved.emit(scene_pos)
 
-        if self._drawing_mode_active and self._pixmap_item:
+        if not self._pixmap_item: # No image, no interaction
+            super().mouseMoveEvent(event)
+            return
+
+        if self._calibration_mode_active and len(self._calibration_points) == 1:
+            # Draw rubber band line from first point to current mouse position
+            p1 = self._calibration_points[0]
+            if not self._calibration_line_item:
+                self._calibration_line_item = QGraphicsLineItem(p1.x(), p1.y(), scene_pos.x(), scene_pos.y())
+                self._calibration_line_item.setPen(self._calibration_line_pen)
+                self.scene.addItem(self._calibration_line_item)
+            else:
+                self._calibration_line_item.setLine(p1.x(), p1.y(), scene_pos.x(), scene_pos.y())
+            return # Consume event in calibration mode
+
+        if self._drawing_mode_active:
             if self._is_dragging_point and self._selected_point_index != -1:
-                # Update the position of the dragged point
                 self.point_moved_in_drawing.emit(self._selected_point_index, scene_pos)
             elif len(self._current_drawing_points_items) > 0 and not self._is_dragging_point:
-                # Draw rubber band line from last point to current mouse position
                 last_point_pos = self._current_drawing_points_items[-1].rect().center()
                 if not self._rubber_band_line:
                     self._rubber_band_line = QGraphicsLineItem(last_point_pos.x(), last_point_pos.y(), scene_pos.x(), scene_pos.y())
@@ -384,13 +473,15 @@ class RoofCanvas(QGraphicsView):
                     self.scene.addItem(self._rubber_band_line)
                 else:
                     self._rubber_band_line.setLine(last_point_pos.x(), last_point_pos.y(), scene_pos.x(), scene_pos.y())
-        elif self._pixmap_item: # Not in drawing mode, handle panning
-            if event.buttons() == Qt.MouseButton.LeftButton and self.dragMode() == QGraphicsView.DragMode.ScrollHandDrag:
-                delta = event.position() - self._last_pan_pos
-                self._last_pan_pos = event.position()
-                self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
-                self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
-                self.pan_offset_changed.emit(QPointF(delta.x(), delta.y()))
+            return # Consume event in drawing mode
+
+        # Default panning behavior
+        if event.buttons() == Qt.MouseButton.LeftButton and self.dragMode() == QGraphicsView.DragMode.ScrollHandDrag:
+            delta = event.position() - self._last_pan_pos
+            self._last_pan_pos = event.position()
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            self.pan_offset_changed.emit(QPointF(delta.x(), delta.y()))
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -400,17 +491,26 @@ class RoofCanvas(QGraphicsView):
         scene_pos = self.mapToScene(event.position().toPoint())
         self.mouse_released.emit(scene_pos, event.button())
 
-        if self._drawing_mode_active and self._pixmap_item:
+        if not self._pixmap_item: # No image, no interaction
+            super().mouseReleaseEvent(event)
+            return
+
+        if self._calibration_mode_active:
+            # No specific action on mouse release in calibration mode, just consume event
+            return
+
+        if self._drawing_mode_active:
             if event.button() == Qt.MouseButton.LeftButton:
                 self._is_dragging_point = False
                 self._selected_point_item = None
                 self._selected_point_index = -1
-                self.viewport().setCursor(Qt.CursorShape.CrossCursor) # Reset cursor
-                # Update visuals to remove selected point highlight
+                self.viewport().setCursor(Qt.CursorShape.CrossCursor)
                 self.update_drawing_visuals(self._get_current_drawing_points_from_items())
-        elif self._pixmap_item: # Not in drawing mode, handle panning
-            if event.button() == Qt.MouseButton.LeftButton:
-                self.setDragMode(QGraphicsView.DragMode.NoDrag)
+            return # Consume event in drawing mode
+
+        # Default panning behavior
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setDragMode(QGraphicsView.DragMode.NoDrag)
         super().mouseReleaseEvent(event)
 
     def resizeEvent(self, event) -> None:

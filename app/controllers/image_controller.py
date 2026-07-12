@@ -9,6 +9,7 @@ from typing import Optional
 import numpy as np
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtCore import Signal, QObject
+import cv2 # Added import for OpenCV
 
 from app.core.image.image_loader import ImageLoader
 from app.core.image.image_model import ImageInfo
