@@ -167,8 +167,19 @@ class MainWindow(QMainWindow):
         self.workspace.roof_canvas.polygon_drawing_finished.connect(self.geometry_controller.finalize_polygon)
         self.workspace.roof_canvas.drawing_mode_changed.connect(self._on_drawing_mode_changed)
         self.workspace.roof_canvas.calibration_points_selected.connect(self._on_calibration_points_selected) # Connect new signal
-        # Connect AI overlay vertex move signal to GeometryController handler
-        self.workspace.roof_canvas.ai_overlay_vertex_moved.connect(self.geometry_controller.move_ai_overlay_point)
+        # Connect AI overlay vertex move signal (debounced) to GeometryController handler
+        # Use debounced signal to avoid flooding controller during fast dragging
+        try:
+            self.workspace.roof_canvas.ai_overlay_vertex_moved_debounced.connect(self.geometry_controller.move_ai_overlay_point)
+        except Exception:
+            # Fallback to immediate signal if debounced not available
+            self.workspace.roof_canvas.ai_overlay_vertex_moved.connect(self.geometry_controller.move_ai_overlay_point)
+
+        # Connect plane selection signal to load selected polygon into GeometryController
+        try:
+            self.workspace.roof_canvas.ai_overlay_plane_selected.connect(lambda idx, pts: self.geometry_controller.load_ai_overlay_polygon(Polygon2D(vertices=[Point2D(x, y) for (x, y) in pts])))
+        except Exception:
+            pass
 
         # GeometryController Signals
         self.geometry_controller.polygon_drawing_updated.connect(self.workspace.roof_canvas.update_drawing_visuals)

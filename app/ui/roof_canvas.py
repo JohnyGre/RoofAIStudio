@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QGraphicsEllipseItem, QGraphicsLineItem, QGraphicsPolygonItem, QGraphicsSimpleTextItem, QGraphicsItem
 )
 from PySide6.QtGui import QPixmap, QTransform, QMouseEvent, QWheelEvent, QPen, QBrush, QColor, QImage, QPolygonF, QPainter
-from PySide6.QtCore import Qt, Signal, QPointF, QRectF
+from PySide6.QtCore import Qt, Signal, QPointF, QRectF, QTimer
 from app.core.logger import setup_logging # Import logger
 
 from app.core.image.image_model import ImageInfo
@@ -83,6 +83,10 @@ class RoofCanvas(QGraphicsView):
 
     # New signal for AI overlay vertex moves: emits (index, scene QPointF)
     ai_overlay_vertex_moved = Signal(int, QPointF)
+    # Debounced version (emitted after short pause) to reduce update frequency during dragging
+    ai_overlay_vertex_moved_debounced = Signal(int, QPointF)
+    # Signal emitted when a plane overlay is selected: (index, list_of_pixel_tuples)
+    ai_overlay_plane_selected = Signal(int, list)
 
     # New signal for calibration
     calibration_points_selected = Signal(Point2D, Point2D) # Emits two pixel points
@@ -127,13 +131,24 @@ class RoofCanvas(QGraphicsView):
         # AI Overlay variables
         self._ai_overlay_active: bool = False
         self._ai_overlay_items: List[Union[QGraphicsPolygonItem, QGraphicsPixmapItem, QGraphicsRectItem]] = [] # Added QGraphicsRectItem
-        # Polygon overlay and draggable vertices
+        # Support multiple detected planes: list of dicts {polygon_item, polygon_points, color}
+        self._ai_planes: List[dict] = []
+        self._selected_ai_plane_index: int = -1
+        # Polygon overlay and draggable vertices for the SELECTED plane
         self._ai_polygon_item: Optional[QGraphicsPolygonItem] = None
         self._ai_vertex_items: List[DraggableVertexItem] = []
         self._ai_vertex_label_items: List[QGraphicsSimpleTextItem] = []
         self._current_ai_polygon_points: List[QPointF] = []
-        # Area text item for AI overlay
+        # Area text item for AI overlay (shared, shows area for selected plane)
         self._ai_area_text_item: Optional[QGraphicsSimpleTextItem] = None
+        # Debounce infrastructure for vertex moved events
+        self._debounce_timer = QTimer(self)
+        self._debounce_timer.setSingleShot(True)
+        self._debounce_interval_ms = 100
+        self._debounce_timer.timeout.connect(self._flush_debounced_moves)
+        self._debounce_pending: dict = {}
+        # Color palette for planes
+        self._ai_plane_colors = [QColor(0, 170, 0), QColor(0, 85, 170), QColor(170, 85, 0), QColor(170, 0, 170), QColor(85,170,85)]
         # Connect internal overlay move signal to handler
         self.ai_overlay_vertex_moved.connect(self._on_ai_overlay_vertex_moved)
 
@@ -213,6 +228,9 @@ class RoofCanvas(QGraphicsView):
         if not active:
             self.clear_ai_overlay_visuals()
         # If activating, the overlay will be drawn when display_ai_results is called
+        # Reset selection when re-enabling
+        if active:
+            self._selected_ai_plane_index = -1
 
     def display_qpixmap(self, pixmap: QPixmap, image_info: ImageInfo) -> None:
         """
@@ -371,12 +389,12 @@ class RoofCanvas(QGraphicsView):
     def _on_ai_overlay_vertex_moved(self, index: int, scene_pos: QPointF) -> None:
         """
         Internal handler when a vertex is moved by user. Update polygon visual immediately.
+        Also schedule a debounced emission for external consumers.
         """
         if not (0 <= index < len(self._current_ai_polygon_points)):
             return
-        # Update point
+        # Update point immediately for visual feedback
         self._current_ai_polygon_points[index] = scene_pos
-        # Update polygon item
         if self._ai_polygon_item:
             try:
                 new_poly = QPolygonF(self._current_ai_polygon_points)
@@ -387,6 +405,13 @@ class RoofCanvas(QGraphicsView):
         if index < len(self._ai_vertex_label_items):
             label = self._ai_vertex_label_items[index]
             label.setPos(scene_pos + QPointF(6.0 / max(0.1, self._zoom_factor), -12.0 / max(0.1, self._zoom_factor)))
+
+        # Store pending move for debounce and restart timer
+        try:
+            self._debounce_pending[int(index)] = scene_pos
+            self._debounce_timer.start(self._debounce_interval_ms)
+        except Exception:
+            pass
 
     def clear_calibration_visuals(self) -> None:
         """
@@ -402,12 +427,14 @@ class RoofCanvas(QGraphicsView):
     def display_ai_results_overlay(self, ai_results: List[Union[DetectionResult, SegmentationResult]]) -> None:
         """
         Displays AI detection and segmentation results as an overlay on the canvas.
+        Supports multiple detected planes; the first plane is selected by default.
         """
         self.clear_ai_overlay_visuals()
 
         if not self._ai_overlay_active:
             return
 
+        plane_index = 0
         for result in ai_results:
             if isinstance(result, SegmentationResult):
                 if result.mask is not None and result.image_size is not None:
@@ -445,77 +472,46 @@ class RoofCanvas(QGraphicsView):
 
             elif isinstance(result, DetectionResult):
                 bbox = result.bounding_box
-                # If polygon vertices present in metadata, use polygon overlay with draggable vertices
+                # If polygon vertices present in metadata, use polygon overlay
                 polygon_pts = None
-                if isinstance(result.metadata, dict) and result.metadata.get("contour_polygon"):
-                    polygon_pts = result.metadata.get("contour_polygon")
+                if isinstance(result.metadata, dict):
+                    polygon_pts = result.metadata.get("polygon_vertices") or result.metadata.get("contour_polygon")
 
                 if polygon_pts:
                     qpoints = [QPointF(float(x), float(y)) for (x, y) in polygon_pts]
-                    self._current_ai_polygon_points = qpoints
                     qpoly = QPolygonF(qpoints)
                     polygon_item = QGraphicsPolygonItem(qpoly)
-                    polygon_item.setPen(self._contour_pen)
+
+                    # Assign color from palette
+                    color = self._ai_plane_colors[plane_index % len(self._ai_plane_colors)]
+                    pen = QPen(color, 2)
+                    polygon_item.setPen(pen)
                     polygon_item.setBrush(Qt.NoBrush)
+
                     self.scene.addItem(polygon_item)
                     polygon_item.setZValue(1)
                     self._ai_overlay_items.append(polygon_item)
-                    self._ai_polygon_item = polygon_item
 
-                    # Create draggable vertex items and labels
-                    point_size = 8 / self._zoom_factor
-                    for i, qp in enumerate(qpoints):
-                        v_item = DraggableVertexItem(i, qp, point_size, self)
-                        v_item.setZValue(2)
-                        self.scene.addItem(v_item)
-                        self._ai_vertex_items.append(v_item)
+                    # Store plane info
+                    self._ai_planes.append({
+                        'polygon_item': polygon_item,
+                        'polygon_points': qpoints,
+                        'color': color
+                    })
 
-                        label = QGraphicsSimpleTextItem(str(i+1))
-                        label.setBrush(QBrush(QColor(255, 255, 255)))
-                        label.setZValue(3)
-                        label.setPos(qp + QPointF(6/ self._zoom_factor, -12/ self._zoom_factor))
-                        self.scene.addItem(label)
-                        self._ai_vertex_label_items.append(label)
+                    # Select the first plane by default
+                    if self._selected_ai_plane_index == -1:
+                        self._select_ai_plane(plane_index)
 
-                    # Enable move emits after all vertex items are created
-                    for v in self._ai_vertex_items:
-                        try:
-                           v.enable_move_emits()
-                        except Exception:
-                           pass
-
-                    # Create area text item (initially empty, updated via signal)
-                    if self._ai_area_text_item is None:
-                        area_text = QGraphicsSimpleTextItem("")
-                        area_text.setBrush(QBrush(QColor(255, 255, 255)))
-                        area_text.setZValue(4)
-                        self.scene.addItem(area_text)
-                        self._ai_area_text_item = area_text
-                    # Position area text at centroid
-                    if self._current_ai_polygon_points:
-                        centroid = QPointF(0.0, 0.0)
-                        for p in self._current_ai_polygon_points:
-                           centroid += p
-                        centroid /= max(1, len(self._current_ai_polygon_points))
-                        if self._ai_area_text_item:
-                           self._ai_area_text_item.setPos(centroid + QPointF(6.0 / max(0.1, self._zoom_factor), -12.0 / max(0.1, self._zoom_factor)))
-
+                    plane_index += 1
                 else:
                     rect = QRectF(bbox.x_min, bbox.y_min, bbox.width, bbox.height)
                     rect_item = self.scene.addRect(rect, self._detection_box_pen)
                     self._ai_overlay_items.append(rect_item)
 
-        for item in self._ai_overlay_items:
-            item.setZValue(1)
-        # Ensure vertex items and labels have proper Z
-        for v in self._ai_vertex_items:
-            v.setZValue(2)
-        for l in self._ai_vertex_label_items:
-            l.setZValue(3)
-        # Ensure area text sits above polygon
+        # Ensure area text is above polygons
         if self._ai_area_text_item:
             self._ai_area_text_item.setZValue(4)
-            # Slightly offset text to avoid overlap with vertices
             if self._current_ai_polygon_points:
                 centroid = QPointF(0.0, 0.0)
                 for p in self._current_ai_polygon_points:
@@ -552,6 +548,98 @@ class RoofCanvas(QGraphicsView):
             centroid /= max(1, len(self._current_ai_polygon_points))
             self._ai_area_text_item.setPos(centroid + QPointF(6.0 / max(0.1, self._zoom_factor), -12.0 / max(0.1, self._zoom_factor)))
 
+    def _flush_debounced_moves(self) -> None:
+        """Emit any pending vertex moves after debounce interval."""
+        try:
+            pending = list(self._debounce_pending.items())
+            self._debounce_pending.clear()
+            for idx, pos in pending:
+                self.ai_overlay_vertex_moved_debounced.emit(int(idx), pos)
+        except Exception:
+            pass
+
+    def _select_ai_plane(self, index: int) -> None:
+        """Select a detected AI plane for editing. Shows vertices for the selected plane and hides others."""
+        if index == self._selected_ai_plane_index:
+            return
+        # Clear vertex visuals for previous selection
+        for v in list(self._ai_vertex_items):
+            try:
+                self.scene.removeItem(v)
+            except Exception:
+                pass
+        self._ai_vertex_items.clear()
+        for l in list(self._ai_vertex_label_items):
+            try:
+                self.scene.removeItem(l)
+            except Exception:
+                pass
+        self._ai_vertex_label_items.clear()
+        # Reset polygon item visual for previous
+        if 0 <= self._selected_ai_plane_index < len(self._ai_planes):
+            prev = self._ai_planes[self._selected_ai_plane_index]
+            try:
+                prev['polygon_item'].setPen(QPen(prev.get('color', QColor(0,170,0)), 2))
+            except Exception:
+                pass
+        # Update selection
+        self._selected_ai_plane_index = index
+        if not (0 <= index < len(self._ai_planes)):
+            self._ai_polygon_item = None
+            self._current_ai_polygon_points = []
+            return
+        plane = self._ai_planes[index]
+        self._ai_polygon_item = plane['polygon_item']
+        self._current_ai_polygon_points = list(plane['polygon_points'])
+        # Highlight selected polygon
+        try:
+            highlight_pen = QPen(QColor(255, 255, 0), 3)
+            self._ai_polygon_item.setPen(highlight_pen)
+        except Exception:
+            pass
+        # Create vertex items and labels for selected polygon
+        point_size = 8 / max(0.1, self._zoom_factor)
+        for i, qp in enumerate(self._current_ai_polygon_points):
+            v_item = DraggableVertexItem(i, qp, point_size, self)
+            v_item.setZValue(2)
+            self.scene.addItem(v_item)
+            self._ai_vertex_items.append(v_item)
+
+            label = QGraphicsSimpleTextItem(str(i+1))
+            label.setBrush(QBrush(QColor(255, 255, 255)))
+            label.setZValue(3)
+            label.setPos(qp + QPointF(6/ self._zoom_factor, -12/ self._zoom_factor))
+            self.scene.addItem(label)
+            self._ai_vertex_label_items.append(label)
+
+        for v in self._ai_vertex_items:
+            try:
+               v.enable_move_emits()
+            except Exception:
+               pass
+
+        # Ensure area text exists
+        if self._ai_area_text_item is None:
+            area_text = QGraphicsSimpleTextItem("")
+            area_text.setBrush(QBrush(QColor(255, 255, 255)))
+            area_text.setZValue(4)
+            self.scene.addItem(area_text)
+            self._ai_area_text_item = area_text
+        # Position area text
+        centroid = QPointF(0.0, 0.0)
+        for p in self._current_ai_polygon_points:
+            centroid += p
+        centroid /= max(1, len(self._current_ai_polygon_points))
+        if self._ai_area_text_item:
+            self._ai_area_text_item.setPos(centroid + QPointF(6.0 / max(0.1, self._zoom_factor), -12.0 / max(0.1, self._zoom_factor)))
+
+        # Emit selection for external handlers (as list of tuples)
+        try:
+            pts = [(float(p.x()), float(p.y())) for p in self._current_ai_polygon_points]
+            self.ai_overlay_plane_selected.emit(index, pts)
+        except Exception:
+            pass
+
     def clear_ai_overlay_visuals(self) -> None:
         """
         Removes all AI overlay items from the scene.
@@ -563,6 +651,14 @@ class RoofCanvas(QGraphicsView):
                 pass
         self._ai_overlay_items.clear()
         # Remove polygon and vertex items if present
+        # Remove stored plane polygons
+        for p in self._ai_planes:
+            try:
+                if 'polygon_item' in p and p['polygon_item']:
+                    self.scene.removeItem(p['polygon_item'])
+            except Exception:
+                pass
+        self._ai_planes.clear()
         if self._ai_polygon_item:
             try:
                 self.scene.removeItem(self._ai_polygon_item)
@@ -641,6 +737,17 @@ class RoofCanvas(QGraphicsView):
         if not self._pixmap_item: # No image, no interaction
             super().mousePressEvent(event)
             return
+
+        # If AI overlay is active and user clicked on an overlay polygon, select the plane
+        if self._ai_overlay_active and not self._calibration_mode_active and not self._drawing_mode_active:
+            items_at_pos = self.scene.items(scene_pos)
+            for it in items_at_pos:
+                # Find matching plane polygon
+                for idx, plane in enumerate(self._ai_planes):
+                    if it is plane.get('polygon_item'):
+                        # Select this plane for editing
+                        self._select_ai_plane(idx)
+                        return
 
         if self._calibration_mode_active:
             if event.button() == Qt.MouseButton.LeftButton:
