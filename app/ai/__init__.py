@@ -2,8 +2,9 @@ from .ai_model import AIModel
 from .ai_result import DetectionResult, GeometryPredictionResult, BoundingBox
 from .segmentation_result import SegmentationResult
 from .model_registry import ModelRegistry, model_registry
-from .pipeline import CoreAIPipeline
-from .prediction_pipeline import RoofAnalysisPipeline
+from .pipeline.core import CoreAIPipeline
+from .analysis_pipeline import RoofAnalysisPipeline
+from .pipeline.roof_plane_detector import RoofPlaneDetector
 from .geometry_converter import GeometryConverter
 from .ai_engine import AIEngine
 from .segmentation_model import AbstractSegmentationModel

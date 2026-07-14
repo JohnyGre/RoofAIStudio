@@ -74,13 +74,13 @@ class GeometryConverter:
 
         for dr in detection_results:
             bbox = dr.bounding_box
-            # If the detector provided polygon vertices in metadata, use them for higher-precision geometry
+            # If the detector provided polygon vertices in metadata, prefer them (support both new and legacy keys)
             polygon_pts = None
-            if isinstance(dr.metadata, dict) and dr.metadata.get("contour_polygon"):
-                try:
+            if isinstance(dr.metadata, dict):
+                if dr.metadata.get("polygon_vertices"):
+                    polygon_pts = dr.metadata.get("polygon_vertices")
+                elif dr.metadata.get("contour_polygon"):
                     polygon_pts = dr.metadata.get("contour_polygon")
-                except Exception:
-                    polygon_pts = None
 
             if polygon_pts:
                 # polygon_pts expected as list of (x, y) pairs
@@ -99,9 +99,8 @@ class GeometryConverter:
             # will handle the scaling if calibration is present.
             # For RoofPlane, the polygon is still 2D, but its area calculation will be scaled.
 
-            if dr.class_name == "roof_area":
+            if dr.class_name in ("roof_plane", "roof_area"):
                 # For now, assume a flat plane at z=0 for 3D vertices, or infer from other data
-                # A more advanced system would infer Z from multiple views or depth maps.
                 heights = [0.0] * len(bbox_polygon_2d.vertices) # Placeholder for Z coordinates
                 plane = RoofPlane(
                     name=f"Plane_{dr.id}",
@@ -115,7 +114,7 @@ class GeometryConverter:
                 for i, v2d in enumerate(bbox_polygon_2d.vertices):
                     all_vertices_3d.append(Point3D(v2d.x, v2d.y, heights[i]))
 
-            elif dr.class_name == "potential_opening":
+            elif dr.class_name == "potential_opening" or dr.class_name == "opening":
                 openings.append(bbox_polygon_2d)
 
         # Placeholder for edges, ridges, valleys - these would typically be derived

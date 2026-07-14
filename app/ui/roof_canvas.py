@@ -13,12 +13,15 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QPixmap, QTransform, QMouseEvent, QWheelEvent, QPen, QBrush, QColor, QImage, QPolygonF, QPainter
 from PySide6.QtCore import Qt, Signal, QPointF, QRectF
+from app.core.logger import setup_logging # Import logger
 
 from app.core.image.image_model import ImageInfo
 from app.geometry.point import Point2D
 from app.geometry.polygon import Polygon2D
 from app.ai.segmentation_result import SegmentationResult
 from app.ai.ai_result import DetectionResult, BoundingBox
+
+logger = setup_logging() # Initialize logger
 
 class DraggableVertexItem(QGraphicsEllipseItem):
     """
@@ -36,15 +39,22 @@ class DraggableVertexItem(QGraphicsEllipseItem):
         # Visual style
         self.setPen(canvas._point_pen)
         self.setBrush(canvas._point_brush)
+        # Suppress emits during initial placement
+        self._suppress_move_emit = True
         # Place at scene position
         self.setPos(pos)
+
+    def enable_move_emits(self) -> None:
+        """Enable emitting move events (call after adding items to scene)."""
+        self._suppress_move_emit = False
 
     def itemChange(self, change, value):
         from PySide6.QtWidgets import QGraphicsItem
         if change == QGraphicsItem.ItemPositionHasChanged:
             try:
-                # Emit index and new scene position
-                self._canvas.ai_overlay_vertex_moved.emit(self._index, self.scenePos())
+                # Only emit if not suppressed (i.e., user interaction)
+                if not getattr(self, '_suppress_move_emit', False):
+                    self._canvas.ai_overlay_vertex_moved.emit(self._index, self.scenePos())
             except Exception:
                 pass
         return super().itemChange(change, value)
@@ -122,6 +132,8 @@ class RoofCanvas(QGraphicsView):
         self._ai_vertex_items: List[DraggableVertexItem] = []
         self._ai_vertex_label_items: List[QGraphicsSimpleTextItem] = []
         self._current_ai_polygon_points: List[QPointF] = []
+        # Area text item for AI overlay
+        self._ai_area_text_item: Optional[QGraphicsSimpleTextItem] = None
         # Connect internal overlay move signal to handler
         self.ai_overlay_vertex_moved.connect(self._on_ai_overlay_vertex_moved)
 
@@ -326,8 +338,16 @@ class RoofCanvas(QGraphicsView):
     def update_ai_overlay_visuals(self) -> None:
         """
         Updates vertex marker sizes and label positions according to current zoom level.
+        Also repositions area text if present.
         """
         if not self._ai_polygon_item or not self._ai_vertex_items:
+            # Still update area position relative to polygon centroid if area item exists
+            if self._ai_area_text_item and self._current_ai_polygon_points:
+                centroid = QPointF(0.0, 0.0)
+                for p in self._current_ai_polygon_points:
+                    centroid += p
+                centroid /= max(1, len(self._current_ai_polygon_points))
+                self._ai_area_text_item.setPos(centroid + QPointF(6.0 / max(0.1, self._zoom_factor), -12.0 / max(0.1, self._zoom_factor)))
             return
         point_size = max(4.0, 8.0 / max(0.1, self._zoom_factor))
         for v in self._ai_vertex_items:
@@ -340,6 +360,13 @@ class RoofCanvas(QGraphicsView):
                 v = self._ai_vertex_items[i]
                 scene_pos = v.scenePos()
                 label.setPos(scene_pos + QPointF(6.0 / max(0.1, self._zoom_factor), -12.0 / max(0.1, self._zoom_factor)))
+        # Reposition area text to polygon centroid if present
+        if self._ai_area_text_item and self._current_ai_polygon_points:
+            centroid = QPointF(0.0, 0.0)
+            for p in self._current_ai_polygon_points:
+                centroid += p
+            centroid /= max(1, len(self._current_ai_polygon_points))
+            self._ai_area_text_item.setPos(centroid + QPointF(6.0 / max(0.1, self._zoom_factor), -12.0 / max(0.1, self._zoom_factor)))
 
     def _on_ai_overlay_vertex_moved(self, index: int, scene_pos: QPointF) -> None:
         """
@@ -450,6 +477,29 @@ class RoofCanvas(QGraphicsView):
                         self.scene.addItem(label)
                         self._ai_vertex_label_items.append(label)
 
+                    # Enable move emits after all vertex items are created
+                    for v in self._ai_vertex_items:
+                        try:
+                           v.enable_move_emits()
+                        except Exception:
+                           pass
+
+                    # Create area text item (initially empty, updated via signal)
+                    if self._ai_area_text_item is None:
+                        area_text = QGraphicsSimpleTextItem("")
+                        area_text.setBrush(QBrush(QColor(255, 255, 255)))
+                        area_text.setZValue(4)
+                        self.scene.addItem(area_text)
+                        self._ai_area_text_item = area_text
+                    # Position area text at centroid
+                    if self._current_ai_polygon_points:
+                        centroid = QPointF(0.0, 0.0)
+                        for p in self._current_ai_polygon_points:
+                           centroid += p
+                        centroid /= max(1, len(self._current_ai_polygon_points))
+                        if self._ai_area_text_item:
+                           self._ai_area_text_item.setPos(centroid + QPointF(6.0 / max(0.1, self._zoom_factor), -12.0 / max(0.1, self._zoom_factor)))
+
                 else:
                     rect = QRectF(bbox.x_min, bbox.y_min, bbox.width, bbox.height)
                     rect_item = self.scene.addRect(rect, self._detection_box_pen)
@@ -462,6 +512,45 @@ class RoofCanvas(QGraphicsView):
             v.setZValue(2)
         for l in self._ai_vertex_label_items:
             l.setZValue(3)
+        # Ensure area text sits above polygon
+        if self._ai_area_text_item:
+            self._ai_area_text_item.setZValue(4)
+            # Slightly offset text to avoid overlap with vertices
+            if self._current_ai_polygon_points:
+                centroid = QPointF(0.0, 0.0)
+                for p in self._current_ai_polygon_points:
+                    centroid += p
+                centroid /= max(1, len(self._current_ai_polygon_points))
+                self._ai_area_text_item.setPos(centroid + QPointF(6.0 / max(0.1, self._zoom_factor), -12.0 / max(0.1, self._zoom_factor)))
+
+    def set_ai_overlay_area(self, area_m2: float) -> None:
+        """
+        Update or create an area text overlay showing the area in square meters.
+        """
+        if area_m2 is None:
+            # clear
+            if self._ai_area_text_item:
+                try:
+                    self.scene.removeItem(self._ai_area_text_item)
+                except Exception:
+                    pass
+                self._ai_area_text_item = None
+            return
+        text = f"{area_m2:.1f} m²"
+        if self._ai_area_text_item is None:
+            self._ai_area_text_item = QGraphicsSimpleTextItem(text)
+            self._ai_area_text_item.setBrush(QBrush(QColor(255, 255, 255)))
+            self._ai_area_text_item.setZValue(4)
+            self.scene.addItem(self._ai_area_text_item)
+        else:
+            self._ai_area_text_item.setText(text)
+        # Position at centroid if polygon exists
+        if self._current_ai_polygon_points:
+            centroid = QPointF(0.0, 0.0)
+            for p in self._current_ai_polygon_points:
+                centroid += p
+            centroid /= max(1, len(self._current_ai_polygon_points))
+            self._ai_area_text_item.setPos(centroid + QPointF(6.0 / max(0.1, self._zoom_factor), -12.0 / max(0.1, self._zoom_factor)))
 
     def clear_ai_overlay_visuals(self) -> None:
         """
@@ -493,6 +582,13 @@ class RoofCanvas(QGraphicsView):
                 pass
         self._ai_vertex_label_items.clear()
         self._current_ai_polygon_points.clear()
+        # Remove area text if present
+        if self._ai_area_text_item:
+            try:
+                self.scene.removeItem(self._ai_area_text_item)
+            except Exception:
+                pass
+            self._ai_area_text_item = None
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         """
@@ -539,6 +635,7 @@ class RoofCanvas(QGraphicsView):
         Handles mouse press events for panning, drawing or calibration.
         """
         scene_pos = self.mapToScene(event.position().toPoint())
+        logger.debug(f"mousePressEvent: calibration_mode_active={self._calibration_mode_active}, scene_pos={scene_pos}") # Diagnostic log
         self.mouse_pressed.emit(scene_pos, event.button())
 
         if not self._pixmap_item: # No image, no interaction
@@ -548,12 +645,14 @@ class RoofCanvas(QGraphicsView):
         if self._calibration_mode_active:
             if event.button() == Qt.MouseButton.LeftButton:
                 self._calibration_points.append(scene_pos)
+                logger.debug(f"Calibration mode: Point {len(self._calibration_points)} selected at {scene_pos}") # Diagnostic log
                 self.update_calibration_visuals()
                 if len(self._calibration_points) == 2:
                     self.calibration_points_selected.emit(
                         Point2D(self._calibration_points[0].x(), self._calibration_points[0].y()),
                         Point2D(self._calibration_points[1].x(), self._calibration_points[1].y())
                     )
+                    logger.debug("Calibration mode: calibration_points_selected.emit called.") # Diagnostic log
                     self.set_calibration_mode(False) # Exit calibration mode after selecting points
             return # Consume event in calibration mode
 

@@ -25,6 +25,7 @@ from app.materials.calculation_result import MaterialCalculationResult
 from app.geometry.roof_geometry import RoofGeometry
 from app.ai.ai_result import DetectionResult, SegmentationResult
 from app.geometry.point import Point2D # Added import for Point2D
+from app.geometry.polygon import Polygon2D
 
 class MainWindow(QMainWindow):
     """
@@ -166,6 +167,8 @@ class MainWindow(QMainWindow):
         self.workspace.roof_canvas.polygon_drawing_finished.connect(self.geometry_controller.finalize_polygon)
         self.workspace.roof_canvas.drawing_mode_changed.connect(self._on_drawing_mode_changed)
         self.workspace.roof_canvas.calibration_points_selected.connect(self._on_calibration_points_selected) # Connect new signal
+        # Connect AI overlay vertex move signal to GeometryController handler
+        self.workspace.roof_canvas.ai_overlay_vertex_moved.connect(self.geometry_controller.move_ai_overlay_point)
 
         # GeometryController Signals
         self.geometry_controller.polygon_drawing_updated.connect(self.workspace.roof_canvas.update_drawing_visuals)
@@ -174,6 +177,8 @@ class MainWindow(QMainWindow):
         self.geometry_controller.error_occurred.connect(self.status_bar.set_status_message)
         self.geometry_controller.roof_geometry_created.connect(self._on_roof_geometry_created)
         self.geometry_controller.measurements_calculated.connect(self._on_measurements_calculated)
+        # Also update AI overlay area text on measurements
+        self.geometry_controller.measurements_calculated.connect(lambda m: self.workspace.roof_canvas.set_ai_overlay_area(m.total_area_m2) if m is not None else None)
         self.geometry_controller.materials_calculated.connect(self._on_materials_calculated)
 
         # AIController Signals
@@ -388,7 +393,33 @@ class MainWindow(QMainWindow):
         Displays the AI results as an overlay on the canvas.
         """
         self.status_bar.set_status_message("AI Analysis completed. Displaying results.")
+        # Ensure AI overlay mode is visible to user
+        try:
+            self.workspace.roof_canvas.set_ai_overlay_mode(True)
+            if hasattr(self, 'ai_overlay_action'):
+                try:
+                    self.ai_overlay_action.setChecked(True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         self.workspace.roof_canvas.display_ai_results_overlay(raw_ai_results)
+        # If detection result contains polygon vertices (pixel-space), load into GeometryController for editing
+        try:
+            for res in raw_ai_results:
+                if isinstance(res, DetectionResult) and isinstance(res.metadata, dict) and res.metadata.get("contour_polygon"):
+                    pts = res.metadata.get("contour_polygon")
+                    try:
+                        polygon_pts = [Point2D(float(x), float(y)) for (x, y) in pts]
+                        pixel_polygon = Polygon2D(vertices=polygon_pts)
+                        self.geometry_controller.load_ai_overlay_polygon(pixel_polygon)
+                        break
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+
         print(f"AI Analysis completed. Generated RoofGeometry: {roof_geometry}")
 
     def _on_toggle_ai_overlay(self, checked: bool) -> None:

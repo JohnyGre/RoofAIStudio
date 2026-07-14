@@ -10,7 +10,7 @@ import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 from app.ai.ai_engine import AIEngine
-from app.ai.prediction_pipeline import RoofAnalysisPipeline
+from app.ai.analysis_pipeline import RoofAnalysisPipeline
 from app.ai.geometry_converter import GeometryConverter
 from app.ai.segmentation_result import SegmentationResult
 from app.ai.ai_result import DetectionResult, GeometryPredictionResult

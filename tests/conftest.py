@@ -26,7 +26,7 @@ from app.ai.models.roof_detector import RoofDetector
 from app.ai.model_registry import model_registry
 from app.ai.ai_engine import AIEngine
 from app.ai.geometry_converter import GeometryConverter
-from app.ai.prediction_pipeline import RoofAnalysisPipeline
+from app.ai.analysis_pipeline import RoofAnalysisPipeline
 from app.core.image.image_loader import ImageLoader
 from app.core.image.image_processor import ImageProcessor
 from app.core.config import config # Import the config object

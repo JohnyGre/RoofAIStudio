@@ -15,7 +15,7 @@ from app.core.logger import setup_logging
 
 # Use TYPE_CHECKING to avoid circular imports for type hints
 if TYPE_CHECKING:
-    from app.ai.prediction_pipeline import RoofAnalysisPipeline
+    from app.ai.analysis_pipeline import RoofAnalysisPipeline
     from app.ai.geometry_converter import GeometryConverter
     from app.geometry.roof_geometry import RoofGeometry
     from app.geometry.calibration import CalibrationModel

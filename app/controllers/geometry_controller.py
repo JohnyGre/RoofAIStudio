@@ -17,10 +17,11 @@ from app.geometry.calibration import CalibrationModel, CalibrationService
 from app.services.measurement_service import RoofMeasurementService, RoofMeasurementResult
 from app.materials.material_calculator import MaterialCalculator
 from app.materials.calculation_result import MaterialCalculationResult
-from app.materials.material_repository import MaterialRepository # New import
-from app.materials.roof_system_model import RoofSystem, RoofLayer # New import for placeholder
-from app.database.enums import MaterialUnit # New import for placeholder material
+from app.materials.material_repository import MaterialRepository
+from app.materials.roof_system_model import RoofSystem, RoofLayer
+from app.database.enums import MaterialUnit
 from app.core.logger import setup_logging
+from app.materials.material_model import Material, MaterialCategory, MaterialManufacturer # Added import for Material, MaterialCategory, MaterialManufacturer
 
 logger = setup_logging()
 
@@ -55,6 +56,7 @@ class GeometryController(QObject):
         """
         super().__init__(parent)
         self._current_pixel_points: List[Point2D] = []
+        self._current_ai_overlay_pixel_points: List[Point2D] = []
         self._current_calibration: Optional[CalibrationModel] = None
         self._is_drawing_active: bool = False
         self._measurement_service = RoofMeasurementService()
@@ -126,7 +128,7 @@ class GeometryController(QObject):
             index (int): The index of the point to move.
             new_pixel_point_qf (QPointF): The new position of the point in pixel coordinates.
         """
-        if not self._is_drawing_active: # Corrected typo: changed _is_is_drawing_active to _is_drawing_active
+        if not self._is_drawing_active:
             self.error_occurred.emit("Drawing mode is not active.")
             return
         if not (0 <= index < len(self._current_pixel_points)):
@@ -200,6 +202,137 @@ class GeometryController(QObject):
             self.calculate_materials(measurements)
 
         self.stop_drawing() # Deactivate drawing mode after finalizing
+
+    # --- AI overlay editing support ---
+    def _update_ai_overlay_geometry(self) -> None:
+        """
+        Internal helper to convert current AI overlay pixel points into real-world
+        RoofGeometry and emit roof_geometry_created and measurements_calculated.
+        Mirrors the workflow used by finalize_polygon().
+        """
+        if not self._current_ai_overlay_pixel_points:
+            logger.debug("_update_ai_overlay_geometry called with no points.")
+            return
+        if self._current_calibration is None:
+            logger.warning("Cannot update AI overlay geometry: no calibration set.")
+            self.error_occurred.emit("Cannot update AI overlay geometry: No calibration model set.")
+            return
+
+        try:
+            pixel_polygon = Polygon2D(vertices=self._current_ai_overlay_pixel_points)
+
+            # Convert pixel points to real-world (meter) points
+            real_world_vertices: List[Point2D] = []
+            for p_pixel in pixel_polygon.vertices:
+                x_meter = CalibrationService.pixel_to_meter(p_pixel.x, self._current_calibration)
+                y_meter = CalibrationService.pixel_to_meter(p_pixel.y, self._current_calibration)
+                real_world_vertices.append(Point2D(x_meter, y_meter))
+
+            real_world_polygon = Polygon2D(vertices=real_world_vertices)
+            # Emit polygon_finalized for downstream listeners (same as finalize_polygon)
+            self.polygon_finalized.emit(real_world_polygon)
+            self.status_message.emit(f"AI overlay polygon finalized. Area: {real_world_polygon.area:.2f} sq m.")
+
+            # Build RoofPlane and RoofGeometry
+            plane_name = f"AI_RooftPlane_{uuid.uuid4().hex[:8]}"
+            heights = [0.0] * len(real_world_polygon.vertices)
+            roof_plane = RoofPlane(
+                name=plane_name,
+                polygon=real_world_polygon,
+                slope=30.0,
+                orientation=0.0,
+                height_at_vertices=heights
+            )
+            vertices_3d = [Point3D(p.x, p.y, h) for p, h in zip(real_world_polygon.vertices, heights)]
+            roof_geometry = RoofGeometry(
+                vertices=vertices_3d,
+                edges=[],
+                planes=[roof_plane],
+                ridges=[],
+                valleys=[],
+                openings=[]
+            )
+
+            # Emit and calculate measurements
+            self.roof_geometry_created.emit(roof_geometry)
+            measurements = self.calculate_measurements(roof_geometry)
+            if measurements:
+                self.calculate_materials(measurements)
+
+            # Logging
+            logger.info("AI overlay geometry updated")
+            logger.info(f"Area: {real_world_polygon.area:.2f} m²")
+            logger.info(f"Vertices: {len(real_world_polygon.vertices)}")
+        except Exception as e:
+            logger.exception(f"Failed to update AI overlay geometry: {e}")
+            self.error_occurred.emit(f"Failed to update AI overlay geometry: {e}")
+
+    def load_ai_overlay_polygon(self, pixel_polygon: Polygon2D) -> None:
+        """
+        Load an AI-provided pixel-space polygon for live editing.
+        Stores pixel vertices and immediately constructs RoofGeometry if calibration
+        is available. Emits roof_geometry_created and measurements_calculated.
+        """
+        if not pixel_polygon or not pixel_polygon.vertices:
+            logger.warning("load_ai_overlay_polygon called with empty polygon.")
+            self.error_occurred.emit("No polygon provided for AI overlay.")
+            return
+
+        # Store pixel points for editing (shallow copy)
+        self._current_ai_overlay_pixel_points = list(pixel_polygon.vertices)
+        logger.info(f"AI overlay polygon loaded ({len(self._current_ai_overlay_pixel_points)} vertices)")
+        self.status_message.emit(f"AI overlay polygon loaded ({len(self._current_ai_overlay_pixel_points)} vertices)")
+
+        # If calibration available, immediately update geometry
+        if self._current_calibration is None:
+            logger.warning("AI overlay loaded but no calibration is set; cannot compute real-world geometry yet.")
+            self.error_occurred.emit("Cannot load AI overlay: No calibration model set.")
+            return
+
+        self._update_ai_overlay_geometry()
+
+    def move_ai_overlay_point(self, index: int, new_pixel_point_qf) -> None:
+        """
+        Handle a vertex move from the UI: overwrite the stored pixel point, then
+        update RoofGeometry and measurements immediately.
+        """
+        if not self._current_ai_overlay_pixel_points:
+            logger.warning("move_ai_overlay_point called but no AI polygon loaded.")
+            self.error_occurred.emit("No AI overlay polygon loaded to edit.")
+            return
+        if not (0 <= index < len(self._current_ai_overlay_pixel_points)):
+            logger.warning(f"move_ai_overlay_point invalid index: {index}")
+            self.error_occurred.emit(f"Invalid AI overlay vertex index: {index}")
+            return
+
+        try:
+            if hasattr(new_pixel_point_qf, 'x') and hasattr(new_pixel_point_qf, 'y'):
+                new_p = Point2D(float(new_pixel_point_qf.x()), float(new_pixel_point_qf.y()))
+            else:
+                # Fallback for Point2D-like objects
+                new_p = Point2D(float(new_pixel_point_qf.x), float(new_pixel_point_qf.y))
+        except Exception:
+            logger.exception("Failed to parse new_pixel_point_qf in move_ai_overlay_point")
+            self.error_occurred.emit("Invalid point provided for AI overlay move.")
+            return
+
+        # Overwrite stored pixel point
+        self._current_ai_overlay_pixel_points[index] = new_p
+
+        # Log vertex move
+        logger.info("AI Overlay vertex moved:")
+        logger.info(f"index={index}")
+        logger.info(f"position=({new_p.x:.2f}, {new_p.y:.2f})")
+        self.status_message.emit(f"AI Overlay vertex moved: index={index} pos=({new_p.x:.1f},{new_p.y:.1f})")
+
+        # Update derived geometry (if calibration available)
+        if self._current_calibration is None:
+            logger.warning("Cannot update AI overlay geometry after move: no calibration set.")
+            self.error_occurred.emit("Cannot update AI overlay geometry: No calibration model set.")
+            return
+
+        # Fast synchronous update (must be lightweight)
+        self._update_ai_overlay_geometry()
 
     def clear_drawing(self) -> None:
         """

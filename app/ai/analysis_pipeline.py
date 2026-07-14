@@ -12,9 +12,9 @@ from app.ai.ai_model import AIModel
 from app.ai.ai_result import DetectionResult, GeometryPredictionResult
 from app.ai.segmentation_result import SegmentationResult
 from app.ai.geometry_converter import GeometryConverter
-from app.ai.pipeline import CoreAIPipeline
+from app.ai.pipeline.core import CoreAIPipeline
 from app.ai.roof_segmentation import RoofSegmentationService
-from app.ai.segmentation_model import AbstractSegmentationModel
+from app.ai.segmentation_model import AbstractSegmentationModel # Needed for isinstance check
 from app.core.logger import setup_logging
 from app.core.image.image_processor import ImageProcessor
 from app.geometry.roof_geometry import RoofGeometry
@@ -135,12 +135,6 @@ class RoofAnalysisPipeline:
             else:
                 logger.warning("Mixed or unsupported AI result types. Returning empty results.")
                 raise TypeError("Unsupported or mixed AI result types for geometry conversion.")
-
-        # If no roof planes were detected, skip strict validation and return empty results gracefully.
-        # This allows the UI to show "no results" instead of treating it as an internal error.
-        if hasattr(roof_geometry, "planes") and len(getattr(roof_geometry, "planes") or []) == 0:
-            logger.info("No roof planes detected by AI pipeline; returning empty results without raising validation error.")
-            return roof_geometry, raw_ai_results
 
         self._validate_output(roof_geometry)
         logger.info("Roof analysis completed successfully.")
