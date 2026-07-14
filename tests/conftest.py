@@ -4,6 +4,7 @@ Configuration file for pytest, providing common fixtures for tests.
 
 import pytest
 import uuid
+import numpy as np
 from datetime import datetime
 from pathlib import Path
 
