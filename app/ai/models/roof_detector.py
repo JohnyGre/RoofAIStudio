@@ -12,27 +12,41 @@ import numpy as np
 from app.ai.models.vision_detector import VisionDetector
 from app.ai.ai_result import DetectionResult, BoundingBox, SegmentationResult, GeometryPredictionResult
 from app.core.logger import setup_logging
-from app.ai.pipeline.roof_plane_detector import RoofPlaneDetector
+from app.ai.pipeline import (
+    RoofPlaneDetector,
+    RoofLineDetector,
+    RoofFeatureDetector,
+    RoofMaterialDetector,
+    RoofDamageDetector
+)
 
 logger = setup_logging()
 
 class RoofDetector(VisionDetector):
     """
-    Facade roof detector that delegates plane extraction to RoofPlaneDetector.
+    Facade roof detector that acts as an orchestrator delegating specific detection tasks
+    to modular sub-detectors.
     """
     MODEL_NAME = "OpenCV_Roof_Detector"
-    VERSION = "0.2.0-opencv-planes"
+    VERSION = "0.3.0-modular"
 
     def __init__(self, model_id: Optional[uuid.UUID] = None):
         super().__init__(self.MODEL_NAME, self.VERSION, model_id)
-        self._plane_detector = RoofPlaneDetector()
+        # Register modular sub-detectors
+        self._detectors = [
+            RoofPlaneDetector(),
+            RoofLineDetector(),
+            RoofFeatureDetector(),
+            RoofMaterialDetector(),
+            RoofDamageDetector()
+        ]
         self._model_info: Dict[str, Any] = {
             "name": self.MODEL_NAME,
             "version": self.VERSION,
-            "description": "Facade that detects roof planes using the RoofPlaneDetector (OpenCV).",
+            "description": "Orchestrator that delegates detection tasks to modular sub-detectors.",
             "input_requirements": "BGR NumPy array image",
             "output_format": "List[DetectionResult]",
-            "trained_classes": ["roof_plane"]
+            "trained_classes": ["roof_plane", "roof_line", "opening", "material", "damage"]
         }
 
     def load(self, model_path: str = "", device: str = "cpu", **kwargs) -> None:
@@ -48,8 +62,14 @@ class RoofDetector(VisionDetector):
         if not self.validate(image):
             raise ValueError("Invalid image input for detection.")
 
-        # Delegate to RoofPlaneDetector which returns multiple DetectionResults
-        results = self._plane_detector.detect(image, **kwargs)
+        # Run all modular sub-detectors and collect all DetectionResults
+        results = []
+        for detector in self._detectors:
+            try:
+                sub_results = detector.detect(image, **kwargs)
+                results.extend(sub_results)
+            except Exception as e:
+                logger.error(f"Sub-detector {detector.__class__.__name__} failed: {e}")
         return results
 
     def get_model_info(self) -> Dict[str, Any]:

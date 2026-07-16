@@ -8,7 +8,7 @@ import cv2 # For image processing in pipeline stages
 import logging # Import logging module
 
 from app.ai.ai_model import AIModel
-from app.ai.ai_result import DetectionResult, GeometryPredictionResult, BoundingBox
+from app.ai.ai_result import DetectionResult, GeometryPredictionResult, BoundingBox, BBoxGeometry
 from app.ai.segmentation_result import SegmentationResult # Use new SegmentationResult
 from app.core.logger import setup_logging
 from app.core.image.image_processor import ImageProcessor
@@ -116,9 +116,9 @@ class CoreAIPipeline:
 
                 if score > kwargs.get("confidence_threshold", 0.5):
                     results.append(DetectionResult(
-                        bounding_box=BoundingBox(bbox[0], bbox[1], bbox[2], bbox[3], label=class_name),
-                        confidence=float(score),
-                        class_name=class_name
+                        class_name=class_name,
+                        geometry=BBoxGeometry(bbox[0], bbox[1], bbox[2], bbox[3]),
+                        confidence=float(score)
                     ))
         elif isinstance(inference_output, dict) and "masks" in inference_output:
             for i in range(len(inference_output["masks"])):

@@ -13,6 +13,7 @@ from app.ai.ai_result import DetectionResult, GeometryPredictionResult
 from app.ai.segmentation_result import SegmentationResult
 from app.ai.geometry_converter import GeometryConverter
 from app.ai.pipeline.core import CoreAIPipeline
+from app.ai.post_processing import RoofPostProcessor
 from app.ai.roof_segmentation import RoofSegmentationService
 from app.ai.segmentation_model import AbstractSegmentationModel # Needed for isinstance check
 from app.core.logger import setup_logging
@@ -38,6 +39,7 @@ class RoofAnalysisPipeline:
         """
         self._ai_engine = ai_engine
         self._geometry_converter = geometry_converter
+        self._post_processor = RoofPostProcessor()
         logger.info("RoofAnalysisPipeline initialized.")
 
     def analyze_image(
@@ -111,11 +113,14 @@ class RoofAnalysisPipeline:
 
             # Convert AI results to RoofGeometry using the GeometryConverter
             if all(isinstance(res, DetectionResult) for res in raw_ai_results):
+                # Run the post processor to clean planes and extract shared edges
+                post_processed = self._post_processor.post_process(raw_ai_results)
                 roof_geometry = self._geometry_converter.convert_detection_results_to_geometry(
-                    detection_results=raw_ai_results,
+                    detection_results=post_processed.planes,
                     image_width=image.shape[1],
                     image_height=image.shape[0],
                     calibration=calibration,
+                    post_processed_edges=post_processed.edges,
                     **kwargs.get("geometry_conversion_params", {})
                 )
             elif all(isinstance(res, SegmentationResult) for res in raw_ai_results):

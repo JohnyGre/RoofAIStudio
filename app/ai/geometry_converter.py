@@ -7,11 +7,11 @@ from typing import List, Union, Optional, Dict, Any
 import numpy as np
 import cv2
 
-from app.ai.ai_result import DetectionResult, GeometryPredictionResult, BoundingBox
+from app.ai.ai_result import DetectionResult, GeometryPredictionResult, BoundingBox, PolygonGeometry, BBoxGeometry
 from app.ai.segmentation_result import SegmentationResult # Use new SegmentationResult
 from app.ai.mask_processor import MaskProcessor # New import
 from app.geometry.point import Point2D, Point3D
-from app.geometry.edge import Edge
+from app.geometry.edge import Edge, RoofEdge
 from app.geometry.polygon import Polygon2D
 from app.geometry.plane import RoofPlane
 from app.geometry.roof_geometry import RoofGeometry
@@ -37,11 +37,11 @@ class GeometryConverter:
         image_height: int,
         calibration: Optional[CalibrationModel] = None,
         default_slope_degrees: float = 30.0,
-        default_orientation_degrees: float = 0.0
+        default_orientation_degrees: float = 0.0,
+        post_processed_edges: Optional[List[RoofEdge]] = None
     ) -> RoofGeometry:
         """
-        Converts a list of DetectionResult objects into a RoofGeometry.
-        This is a simplified conversion, treating bounding boxes as 2D polygons.
+        Converts a list of DetectionResult objects and optional post-processed edges into a RoofGeometry.
 
         Args:
             detection_results (List[DetectionResult]): List of detected objects.
@@ -50,6 +50,7 @@ class GeometryConverter:
             calibration (Optional[CalibrationModel]): Calibration model for pixel to real-world conversion.
             default_slope_degrees (float): Default slope to assign to detected planes.
             default_orientation_degrees (float): Default orientation to assign to detected planes.
+            post_processed_edges (Optional[List[RoofEdge]]): Extracted shared boundary edges between adjacent planes.
 
         Returns:
             RoofGeometry: A RoofGeometry object constructed from the detections.
@@ -74,33 +75,36 @@ class GeometryConverter:
 
         for dr in detection_results:
             bbox = dr.bounding_box
-            # If the detector provided polygon vertices in metadata, prefer them (support both new and legacy keys)
-            polygon_pts = None
-            if isinstance(dr.metadata, dict):
-                if dr.metadata.get("polygon_vertices"):
-                    polygon_pts = dr.metadata.get("polygon_vertices")
-                elif dr.metadata.get("contour_polygon"):
-                    polygon_pts = dr.metadata.get("contour_polygon")
+            bbox_polygon_2d = None
 
-            if polygon_pts:
-                # polygon_pts expected as list of (x, y) pairs
-                polygon_vertices = [Point2D(float(x), float(y)) for (x, y) in polygon_pts]
-                bbox_polygon_2d = Polygon2D(vertices=polygon_vertices)
-            else:
-                # Fallback to bounding box polygon
+            # 1. First check the new structured geometry field
+            if hasattr(dr, "geometry") and dr.geometry is not None:
+                if isinstance(dr.geometry, PolygonGeometry):
+                    polygon_vertices = [Point2D(float(x), float(y)) for (x, y) in dr.geometry.vertices]
+                    bbox_polygon_2d = Polygon2D(vertices=polygon_vertices)
+                elif isinstance(dr.geometry, BBoxGeometry):
+                    p1_2d = Point2D(dr.geometry.x_min, dr.geometry.y_min)
+                    p2_2d = Point2D(dr.geometry.x_max, dr.geometry.y_min)
+                    p3_2d = Point2D(dr.geometry.x_max, dr.geometry.y_max)
+                    p4_2d = Point2D(dr.geometry.x_min, dr.geometry.y_max)
+                    bbox_polygon_2d = Polygon2D(vertices=[p1_2d, p2_2d, p3_2d, p4_2d])
+
+            # 2. Fallback to metadata for backwards compatibility
+            if bbox_polygon_2d is None and isinstance(dr.metadata, dict):
+                polygon_pts = dr.metadata.get("polygon_vertices") or dr.metadata.get("contour_polygon")
+                if polygon_pts:
+                    polygon_vertices = [Point2D(float(x), float(y)) for (x, y) in polygon_pts]
+                    bbox_polygon_2d = Polygon2D(vertices=polygon_vertices)
+
+            # 3. Ultimate fallback to raw bounding box
+            if bbox_polygon_2d is None:
                 p1_2d = Point2D(bbox.x_min, bbox.y_min)
                 p2_2d = Point2D(bbox.x_max, bbox.y_min)
                 p3_2d = Point2D(bbox.x_max, bbox.y_max)
                 p4_2d = Point2D(bbox.x_min, bbox.y_max)
                 bbox_polygon_2d = Polygon2D(vertices=[p1_2d, p2_2d, p3_2d, p4_2d])
 
-            # If calibration is provided, convert 2D pixel points to real-world meters
-            # For simplicity, we'll assume the Polygon2D's area/perimeter methods
-            # will handle the scaling if calibration is present.
-            # For RoofPlane, the polygon is still 2D, but its area calculation will be scaled.
-
             if dr.class_name in ("roof_plane", "roof_area"):
-                # For now, assume a flat plane at z=0 for 3D vertices, or infer from other data
                 heights = [0.0] * len(bbox_polygon_2d.vertices) # Placeholder for Z coordinates
                 plane = RoofPlane(
                     name=f"Plane_{dr.id}",
@@ -110,19 +114,37 @@ class GeometryConverter:
                     height_at_vertices=heights
                 )
                 planes.append(plane)
-                # Add 3D vertices (placeholder for now, assuming 2D points are ground projection)
                 for i, v2d in enumerate(bbox_polygon_2d.vertices):
                     all_vertices_3d.append(Point3D(v2d.x, v2d.y, heights[i]))
 
-            elif dr.class_name == "potential_opening" or dr.class_name == "opening":
+            elif dr.class_name in ("potential_opening", "opening", "skylight", "chimney"):
                 openings.append(bbox_polygon_2d)
 
-        # Placeholder for edges, ridges, valleys - these would typically be derived
-        # from the intersection of planes or more sophisticated geometric analysis.
-        # For now, we'll create an empty list.
+        # 4. Process post-processed shared edges and build 3D connections
         edges: List[Edge] = []
         ridges: List[Edge] = []
         valleys: List[Edge] = []
+
+        if post_processed_edges:
+            for pe in post_processed_edges:
+                # Convert 2D edge points to 3D (assuming z=0 placeholder for flat prediction)
+                start_3d = Point3D(pe.start_point.x, pe.start_point.y, 0.0)
+                end_3d = Point3D(pe.end_point.x, pe.end_point.y, 0.0)
+                all_vertices_3d.append(start_3d)
+                all_vertices_3d.append(end_3d)
+
+                edge_3d = RoofEdge(
+                    start_point=start_3d,
+                    end_point=end_3d,
+                    left_plane_id=pe.left_plane_id,
+                    right_plane_id=pe.right_plane_id,
+                    edge_type=pe.edge_type
+                )
+                edges.append(edge_3d)
+                if pe.edge_type == "ridge":
+                    ridges.append(edge_3d)
+                elif pe.edge_type == "valley":
+                    valleys.append(edge_3d)
 
         # Remove duplicate 3D vertices
         unique_vertices_3d = list(set(all_vertices_3d))

@@ -1,5 +1,14 @@
 from .ai_model import AIModel
-from .ai_result import DetectionResult, GeometryPredictionResult, BoundingBox
+from .ai_result import (
+    DetectionResult,
+    GeometryPredictionResult,
+    BoundingBox,
+    BaseGeometry,
+    BBoxGeometry,
+    PolygonGeometry,
+    MaskGeometry,
+    LineGeometry
+)
 from .segmentation_result import SegmentationResult
 from .model_registry import ModelRegistry, model_registry
 from .pipeline.core import CoreAIPipeline

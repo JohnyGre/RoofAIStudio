@@ -1,1 +1,7 @@
+from .base_detector import BaseSubDetector
 from .roof_plane_detector import RoofPlaneDetector
+from .roof_line_detector import RoofLineDetector
+from .roof_feature_detector import RoofFeatureDetector
+from .roof_material_detector import RoofMaterialDetector
+from .roof_damage_detector import RoofDamageDetector
+

@@ -9,6 +9,7 @@ from pathlib import Path
 from math import isclose
 
 from app.ai.ai_engine import AIEngine
+from app.ai.analysis_pipeline import RoofAnalysisPipeline
 from app.ai.models.roof_detector import RoofDetector
 from app.core.image.image_loader import ImageLoader
 from app.geometry.calibration import CalibrationModel, CalibrationService
@@ -66,6 +67,7 @@ class TestFullPipeline:
     def test_full_ai_to_pricing_pipeline(
         self,
         ai_engine: AIEngine,
+        roof_analysis_pipeline: RoofAnalysisPipeline,
         sample_image_path: Path,
         sample_image_data: np.ndarray,
         sample_calibration_model: CalibrationModel,
@@ -74,32 +76,26 @@ class TestFullPipeline:
     ):
         """
         Tests the complete pipeline from AI analysis of an image to final pricing.
-        Image -> AI Geometry Prediction -> Real-world Measurement -> Material Calculation -> Pricing Estimate
+        Image -> RoofAnalysisPipeline -> Real-world Measurement -> Material Calculation -> Pricing Estimate
         """
         
         # --- Stage 1: AI Geometry Prediction ---
-        # Load the placeholder RoofDetector
-        roof_detector = RoofDetector()
-        ai_engine.register_model(roof_detector)
+        # Load the RoofDetector (facade for RoofPlaneDetector)
         ai_engine.load_model(model_name=RoofDetector.MODEL_NAME)
 
-        # Predict geometry from the sample image
-        # The placeholder detector will find contours and convert them to a simple RoofGeometry
-        predicted_roof_geometry: RoofGeometry = ai_engine.predict_geometry(
+        # Run the full analysis pipeline: detection + geometry conversion
+        predicted_roof_geometry, raw_ai_results = roof_analysis_pipeline.analyze_image(
             image=sample_image_data,
             model_name=RoofDetector.MODEL_NAME,
-            calibration=sample_calibration_model # Pass calibration to pipeline for geometry conversion
+            calibration=sample_calibration_model
         )
 
         assert predicted_roof_geometry is not None
-        assert len(predicted_roof_geometry.planes) >= 1 # Expect at least one plane from contour
-        # The dummy image is red, so the detector should find one large contour (the image itself)
-        # The default image size is 800x600.
-        # The placeholder detector creates a plane from a bounding box.
-        # The bounding box will be roughly the image size.
-        # The geometry converter will convert pixel coords to real-world using calibration.
-        # With 100 px/m, an 800x600 image would be 8x6 meters.
-        # Area = 8 * 6 = 48 sq m.
+        assert len(predicted_roof_geometry.planes) >= 1  # Expect at least one plane
+        assert len(raw_ai_results) >= 1  # Expect at least one detection result
+        # Verify detection results carry polygon_vertices metadata
+        for r in raw_ai_results:
+            assert r.metadata.get("polygon_vertices"), "Detection should have polygon_vertices metadata"
         
         # --- Stage 2: Real-world Measurement ---
         measurement_service = RoofMeasurementService()

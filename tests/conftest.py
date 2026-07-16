@@ -22,7 +22,7 @@ from app.geometry.plane import RoofPlane
 from app.geometry.roof_geometry import RoofGeometry
 from app.geometry.calibration import CalibrationModel
 from app.ai.ai_model import AIModel
-from app.ai.ai_result import DetectionResult, BoundingBox
+from app.ai.ai_result import DetectionResult, BoundingBox, BBoxGeometry
 from app.ai.models.roof_detector import RoofDetector
 from app.ai.model_registry import model_registry
 from app.ai.ai_engine import AIEngine
@@ -200,7 +200,7 @@ def roof_analysis_pipeline(ai_engine: AIEngine, geometry_converter: GeometryConv
 @pytest.fixture
 def sample_detection_result() -> DetectionResult:
     return DetectionResult(
-        bounding_box=BoundingBox(x_min=10.0, y_min=20.0, x_max=110.0, y_max=120.0),
-        confidence=0.95,
-        class_name="roof_area"
+        class_name="roof_area",
+        geometry=BBoxGeometry(x_min=10.0, y_min=20.0, x_max=110.0, y_max=120.0),
+        confidence=0.95
     )

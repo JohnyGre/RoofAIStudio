@@ -19,7 +19,7 @@ from app.core.image.image_model import ImageInfo
 from app.geometry.point import Point2D
 from app.geometry.polygon import Polygon2D
 from app.ai.segmentation_result import SegmentationResult
-from app.ai.ai_result import DetectionResult, BoundingBox
+from app.ai.ai_result import DetectionResult, BoundingBox, PolygonGeometry
 
 logger = setup_logging() # Initialize logger
 
@@ -472,9 +472,14 @@ class RoofCanvas(QGraphicsView):
 
             elif isinstance(result, DetectionResult):
                 bbox = result.bounding_box
-                # If polygon vertices present in metadata, use polygon overlay
                 polygon_pts = None
-                if isinstance(result.metadata, dict):
+                
+                # Check for structured geometry
+                if hasattr(result, "geometry") and isinstance(result.geometry, PolygonGeometry):
+                    polygon_pts = result.geometry.vertices
+                
+                # Fallback to metadata
+                if polygon_pts is None and isinstance(result.metadata, dict):
                     polygon_pts = result.metadata.get("polygon_vertices") or result.metadata.get("contour_polygon")
 
                 if polygon_pts:

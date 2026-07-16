@@ -3,7 +3,7 @@ This module defines the Edge data structure for geometric representations.
 """
 
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Tuple, Optional
 
 from app.geometry.point import Point2D, Point3D, Point
 
@@ -43,3 +43,13 @@ class Edge:
         """
         if type(self.start_point) is not type(self.end_point):
             raise TypeError("Start and end points of an Edge must be of the same type (Point2D or Point3D).")
+
+@dataclass(frozen=True)
+class RoofEdge(Edge):
+    """
+    Represents a roof edge (ridge, valley, eave, hip, rake) connecting two points
+    and maintains relationships to adjacent planes.
+    """
+    left_plane_id: Optional[str] = None
+    right_plane_id: Optional[str] = None
+    edge_type: str = "general"  # e.g., "ridge", "valley", "eave", "hip", "rake", "general"
