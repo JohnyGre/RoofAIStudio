@@ -120,6 +120,94 @@ class LoggingConfig:
     log_inference_time: bool = True
     log_preprocessing: bool = True
     log_exceptions: bool = True
+    log_instance_filtering: bool = True
+    log_roof_grouping: bool = True
+    log_geometry_refinement: bool = True
+    log_quality_scoring: bool = True
+    log_scene_statistics: bool = True
+
+
+# Scene Understanding Configurations (Phase 1)
+@dataclass
+class InstanceFilteringConfig:
+    """Instance filtering configuration."""
+    min_mask_area: int = 100
+    confidence_threshold: float = 0.25
+    duplicate_iou_threshold: float = 0.85
+    min_border_distance: int = 0
+    discard_touching_border: bool = False
+    max_mask_area: int = 0
+
+
+@dataclass
+class RoofGroupingConfig:
+    """Roof grouping configuration."""
+    grouping_distance_threshold: float = 50.0
+    spatial_clustering_max_distance: float = 100.0
+    min_planes_per_group: int = 1
+    confidence_weighting_mode: str = "average"
+
+
+@dataclass
+class GeometryRefinementConfig:
+    """Geometry refinement configuration."""
+    simplification_epsilon: float = 0.01
+    corner_detection_method: str = "harris"
+    harris_block_size: int = 2
+    harris_ksize: int = 3
+    harris_k: float = 0.04
+    min_corner_quality: float = 0.01
+    min_corner_distance: int = 5
+    contour_epsilon_absolute: float = 1.5
+
+
+@dataclass
+class QualityScoringConfig:
+    """Quality scoring configuration."""
+    mask_quality_weight: float = 0.25
+    polygon_quality_weight: float = 0.25
+    edge_consistency_weight: float = 0.25
+    convexity_score_weight: float = 0.25
+    min_solidity: float = 0.5
+    min_extent: float = 0.4
+    edge_consistency_threshold: float = 0.3
+    max_concavity_ratio: float = 0.5
+    quality_excellent_threshold: float = 0.8
+    quality_good_threshold: float = 0.6
+    quality_fair_threshold: float = 0.4
+    quality_poor_threshold: float = 0.0
+
+
+@dataclass
+class ScenePerformanceConfig:
+    """Scene performance and caching configuration."""
+    enable_polygon_cache: bool = True
+    cache_max_size: int = 1000
+    compute_statistics: bool = True
+    thread_pool_size: int = 1
+
+
+@dataclass
+class SceneUnderstandingConfig:
+    """Scene understanding subsystem configuration."""
+    instance_filtering: InstanceFilteringConfig = None
+    roof_grouping: RoofGroupingConfig = None
+    geometry_refinement: GeometryRefinementConfig = None
+    quality_scoring: QualityScoringConfig = None
+    scene_performance: ScenePerformanceConfig = None
+    
+    def __post_init__(self):
+        """Initialize with defaults if not provided."""
+        if self.instance_filtering is None:
+            self.instance_filtering = InstanceFilteringConfig()
+        if self.roof_grouping is None:
+            self.roof_grouping = RoofGroupingConfig()
+        if self.geometry_refinement is None:
+            self.geometry_refinement = GeometryRefinementConfig()
+        if self.quality_scoring is None:
+            self.quality_scoring = QualityScoringConfig()
+        if self.scene_performance is None:
+            self.scene_performance = ScenePerformanceConfig()
 
 
 class DetectionConfig:
@@ -160,6 +248,7 @@ class DetectionConfig:
         self.performance = PerformanceConfig()
         self.default_geometry = DefaultGeometryConfig()
         self.logging = LoggingConfig()
+        self.scene_understanding = SceneUnderstandingConfig()  # Phase 1 - Scene Understanding
         self.model_paths: Dict[str, str] = {}
         self.roof_colors: Dict[str, Dict[str, int]] = {}
 
@@ -315,6 +404,74 @@ class DetectionConfig:
                 log_inference_time=log_cfg.get("log_inference_time", True),
                 log_preprocessing=log_cfg.get("log_preprocessing", True),
                 log_exceptions=log_cfg.get("log_exceptions", True),
+                log_instance_filtering=log_cfg.get("log_instance_filtering", True),
+                log_roof_grouping=log_cfg.get("log_roof_grouping", True),
+                log_geometry_refinement=log_cfg.get("log_geometry_refinement", True),
+                log_quality_scoring=log_cfg.get("log_quality_scoring", True),
+                log_scene_statistics=log_cfg.get("log_scene_statistics", True),
+            )
+
+            # Scene Understanding Configuration (Phase 1)
+            scene_cfg = self.raw_config.get("instance_filtering", {}) or {}
+            instance_filter_cfg = InstanceFilteringConfig(
+                min_mask_area=scene_cfg.get("min_mask_area", 100),
+                confidence_threshold=scene_cfg.get("confidence_threshold", 0.25),
+                duplicate_iou_threshold=scene_cfg.get("duplicate_iou_threshold", 0.85),
+                min_border_distance=scene_cfg.get("min_border_distance", 0),
+                discard_touching_border=scene_cfg.get("discard_touching_border", False),
+                max_mask_area=scene_cfg.get("max_mask_area", 0),
+            )
+            
+            group_cfg = self.raw_config.get("roof_grouping", {}) or {}
+            roof_grouping_cfg = RoofGroupingConfig(
+                grouping_distance_threshold=group_cfg.get("grouping_distance_threshold", 50.0),
+                spatial_clustering_max_distance=group_cfg.get("spatial_clustering_max_distance", 100.0),
+                min_planes_per_group=group_cfg.get("min_planes_per_group", 1),
+                confidence_weighting_mode=group_cfg.get("confidence_weighting_mode", "average"),
+            )
+            
+            geom_cfg = self.raw_config.get("geometry_refinement", {}) or {}
+            geometry_refine_cfg = GeometryRefinementConfig(
+                simplification_epsilon=geom_cfg.get("simplification_epsilon", 0.01),
+                corner_detection_method=geom_cfg.get("corner_detection_method", "harris"),
+                harris_block_size=geom_cfg.get("harris_block_size", 2),
+                harris_ksize=geom_cfg.get("harris_ksize", 3),
+                harris_k=geom_cfg.get("harris_k", 0.04),
+                min_corner_quality=geom_cfg.get("min_corner_quality", 0.01),
+                min_corner_distance=geom_cfg.get("min_corner_distance", 5),
+                contour_epsilon_absolute=geom_cfg.get("contour_epsilon_absolute", 1.5),
+            )
+            
+            qual_cfg = self.raw_config.get("quality_scoring", {}) or {}
+            quality_score_cfg = QualityScoringConfig(
+                mask_quality_weight=qual_cfg.get("mask_quality_weight", 0.25),
+                polygon_quality_weight=qual_cfg.get("polygon_quality_weight", 0.25),
+                edge_consistency_weight=qual_cfg.get("edge_consistency_weight", 0.25),
+                convexity_score_weight=qual_cfg.get("convexity_score_weight", 0.25),
+                min_solidity=qual_cfg.get("min_solidity", 0.5),
+                min_extent=qual_cfg.get("min_extent", 0.4),
+                edge_consistency_threshold=qual_cfg.get("edge_consistency_threshold", 0.3),
+                max_concavity_ratio=qual_cfg.get("max_concavity_ratio", 0.5),
+                quality_excellent_threshold=qual_cfg.get("quality_excellent_threshold", 0.8),
+                quality_good_threshold=qual_cfg.get("quality_good_threshold", 0.6),
+                quality_fair_threshold=qual_cfg.get("quality_fair_threshold", 0.4),
+                quality_poor_threshold=qual_cfg.get("quality_poor_threshold", 0.0),
+            )
+            
+            scene_perf_cfg = self.raw_config.get("scene_performance", {}) or {}
+            scene_perf = ScenePerformanceConfig(
+                enable_polygon_cache=scene_perf_cfg.get("enable_polygon_cache", True),
+                cache_max_size=scene_perf_cfg.get("cache_max_size", 1000),
+                compute_statistics=scene_perf_cfg.get("compute_statistics", True),
+                thread_pool_size=scene_perf_cfg.get("thread_pool_size", 1),
+            )
+            
+            self.scene_understanding = SceneUnderstandingConfig(
+                instance_filtering=instance_filter_cfg,
+                roof_grouping=roof_grouping_cfg,
+                geometry_refinement=geometry_refine_cfg,
+                quality_scoring=quality_score_cfg,
+                scene_performance=scene_perf,
             )
 
             # Roof colors
@@ -365,6 +522,13 @@ class DetectionConfig:
             "performance": self.performance.__dict__,
             "default_geometry": self.default_geometry.__dict__,
             "logging": self.logging.__dict__,
+            "scene_understanding": {
+                "instance_filtering": self.scene_understanding.instance_filtering.__dict__,
+                "roof_grouping": self.scene_understanding.roof_grouping.__dict__,
+                "geometry_refinement": self.scene_understanding.geometry_refinement.__dict__,
+                "quality_scoring": self.scene_understanding.quality_scoring.__dict__,
+                "scene_performance": self.scene_understanding.scene_performance.__dict__,
+            },
             "model_paths": self.model_paths,
         }
 

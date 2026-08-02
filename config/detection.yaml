@@ -171,6 +171,81 @@ default_geometry:
   roof_orientation_degrees: 0.0
   building_height_meters: 8.0
 
+# Scene Understanding - Instance Filtering (Phase 1)
+instance_filtering:
+  # Minimum mask area in pixels (below this, masks are discarded)
+  min_mask_area: 100
+  # Confidence threshold (below this, detections are discarded)
+  confidence_threshold: 0.25
+  # Maximum IOU overlap before considering masks as duplicate
+  duplicate_iou_threshold: 0.85
+  # Minimum distance from image border (pixels) - 0 to disable
+  min_border_distance: 0
+  # Discard masks that touch the image border (true/false)
+  discard_touching_border: false
+  # Maximum allowed mask area (for filtering out noise) - 0 to disable
+  max_mask_area: 0
+
+# Scene Understanding - Roof Grouping (Phase 1)
+roof_grouping:
+  # Distance threshold for grouping planes (pixels) - planes closer than this are grouped
+  grouping_distance_threshold: 50
+  # Maximum spatial clustering distance for K-means (used for building center estimation)
+  spatial_clustering_max_distance: 100
+  # Minimum planes required to form a valid group
+  min_planes_per_group: 1
+  # Confidence weighting for group confidence calculation
+  confidence_weighting_mode: "average"  # "average", "max", "min"
+
+# Scene Understanding - Geometry Refinement (Phase 1)
+geometry_refinement:
+  # Douglas-Peucker simplification epsilon (relative to contour perimeter)
+  simplification_epsilon: 0.01
+  # Corner detection method
+  corner_detection_method: "harris"  # "harris", "shi_tomasi", "fast"
+  # Harris corner detector parameters
+  harris_block_size: 2
+  harris_ksize: 3
+  harris_k: 0.04
+  # Minimum corner quality threshold (0.0-1.0)
+  min_corner_quality: 0.01
+  # Minimum distance between detected corners (pixels)
+  min_corner_distance: 5
+  # Contour epsilon for Douglas-Peucker (absolute, will be computed from perimeter)
+  contour_epsilon_absolute: 1.5
+
+# Scene Understanding - Quality Scoring (Phase 1)
+quality_scoring:
+  # Mask quality weights (total should sum to 1.0 for normalized scoring)
+  mask_quality_weight: 0.25
+  polygon_quality_weight: 0.25
+  edge_consistency_weight: 0.25
+  convexity_score_weight: 0.25
+  # Solidity threshold (area / convex hull area)
+  min_solidity: 0.5
+  # Extent threshold (area / bounding box area)
+  min_extent: 0.4
+  # Edge consistency detection - variance in edge gradients
+  edge_consistency_threshold: 0.3
+  # Convexity threshold (0.0 = perfectly convex, 1.0 = very concave)
+  max_concavity_ratio: 0.5
+  # Quality score bins (for thresholding)
+  quality_excellent_threshold: 0.8  # >= 0.8
+  quality_good_threshold: 0.6      # >= 0.6
+  quality_fair_threshold: 0.4      # >= 0.4
+  quality_poor_threshold: 0.0      # >= 0.0 (below this is rejected)
+
+# Scene Understanding - Performance & Caching (Phase 1)
+scene_performance:
+  # Enable polygon caching to avoid recomputing contours
+  enable_polygon_cache: true
+  # Cache size limit (number of cached polygons)
+  cache_max_size: 1000
+  # Enable statistics computation
+  compute_statistics: true
+  # Prepare for multithreading (reserved for future use)
+  thread_pool_size: 1
+
 # Logging
 logging:
   level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -178,3 +253,9 @@ logging:
   log_inference_time: true
   log_preprocessing: true
   log_exceptions: true
+  # Scene understanding logging
+  log_instance_filtering: true
+  log_roof_grouping: true
+  log_geometry_refinement: true
+  log_quality_scoring: true
+  log_scene_statistics: true

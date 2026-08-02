@@ -43,3 +43,11 @@ build/
 # Data
 data/
 projects/
+# AI Models & Training artifacts
+*.pt
+*.pth
+runs/
+ai_models/
+
+# Reports
+COPILOT_SCENE_REPORT.md
