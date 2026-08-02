@@ -1,0 +1,15 @@
+PySide6
+SQLAlchemy
+Pillow
+numpy
+scipy
+opencv-python
+scikit-image
+tensorflow # Or PyTorch, depending on AI module choice
+reportlab
+pytest
+shapely
+ultralytics # Added for YOLO
+torch # Added for PyTorch/YOLO
+torchvision # Common companion for PyTorch
+torchaudio # Common companion for PyTorch
