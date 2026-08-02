@@ -1,0 +1,180 @@
+# RoofAI Detection Configuration
+# This file centralizes all AI detection parameters
+
+# Model Paths
+models:
+  yolo:
+    building_detector: "ai_models/yolov8n_building_seg.pt"
+    coco_detector: "ai_models/yolov8n-seg.pt"
+    roof_finetuned: "ai_models/roof_finetuned.pt"
+  sam:
+    vit_b: "ai_models/sam_vit_b_01ec64.pth"
+    checkpoint_dir: "ai_models"
+  sam2:
+    tiny: "ai_models/sam2_tiny.pt"
+    small: "ai_models/sam2_small.pt"
+    base_plus: "ai_models/sam2_base_plus.pt"
+    large: "ai_models/sam2_large.pt"
+
+# YOLO Inference Parameters
+yolo:
+  confidence_threshold: 0.25
+  iou_threshold: 0.45
+  nms_threshold: 0.7
+  image_size: 640
+  device: "auto"  # "auto", "cpu", "cuda", "cuda:0", etc.
+  half_precision: false  # Use FP16 if available
+  max_batch_size: 8
+
+# SAM Segmentation Parameters
+sam:
+  model_type: "vit_b"  # "vit_h", "vit_l", "vit_b", "vit_t" (for Mobile SAM)
+  device: "auto"
+  image_encoder_type: "default"  # For SAM2: "tiny", "small", "base_plus", "large"
+
+# Mask Processing
+mask_processing:
+  binary_threshold: 0.5
+  min_mask_area_pixels: 80  # Discard masks smaller than this
+  morphology_kernel_size: 5
+  morphology_iterations: 2
+  contour_simplification_epsilon: 0.01  # Relative to contour perimeter
+
+# Roof Color Classification
+roof_colors:
+  # RGB ranges for common roof materials
+  dark_asphalt:
+    b_min: 60
+    b_max: 150
+    g_min: 60
+    g_max: 150
+    r_min: 60
+    r_max: 150
+  light_gray:
+    b_min: 100
+    b_max: 200
+    g_min: 100
+    g_max: 200
+    r_min: 100
+    r_max: 200
+  red_clay:
+    b_min: 0
+    b_max: 100
+    g_min: 80
+    g_max: 160
+    r_min: 120
+    r_max: 200
+  white_metal:
+    b_min: 200
+    b_max: 255
+    g_min: 200
+    g_max: 255
+    r_min: 200
+    r_max: 255
+  tan_beige:
+    b_min: 100
+    b_max: 160
+    g_min: 120
+    g_max: 180
+    r_min: 150
+    r_max: 220
+  orange_terra:
+    b_min: 50
+    b_max: 120
+    g_min: 100
+    g_max: 180
+    r_min: 150
+    r_max: 230
+  green_moss:
+    b_min: 60
+    b_max: 140
+    g_min: 100
+    g_max: 180
+    r_min: 60
+    r_max: 140
+  brown_cedar:
+    b_min: 40
+    b_max: 120
+    g_min: 60
+    g_max: 140
+    r_min: 80
+    r_max: 160
+
+roof_color_saturation_range:
+  min: 0.02
+  max: 0.25
+
+# Edge Detection (Canny)
+edge_detection:
+  canny_threshold_low: 30
+  canny_threshold_high: 90
+  kernel_size: 3
+
+# Roof Plane Detection (OpenCV)
+roof_plane_detection:
+  contour_quality_min_area: 500  # Minimum contour area in pixels
+  contour_quality_solidity_min: 0.7  # Min solidity (area / convex hull area)
+  contour_quality_extent_min: 0.5  # Min extent (area / bounding box area)
+  contour_quality_hu_distance_max: 0.3  # Max Hu moment distance
+  watershed_markers: 100  # Number of K-means clusters for watershed
+  morphology_open_kernel_size: 5
+  morphology_close_kernel_size: 7
+
+# Post-Processing
+post_processing:
+  nms_iou_threshold: 0.45
+  merge_similar_planes: true
+  max_results: 15  # Maximum number of planes to return
+  min_roof_quality_score: 0.25
+
+# SAHI (Large Image Tiling)
+sahi:
+  enabled: false
+  tile_size: 640
+  tile_overlap_ratio: 0.2  # 20% overlap
+
+# Line Detection (Ridge, Valley, Eave)
+line_detection:
+  hough_rho_resolution: 1
+  hough_theta_resolution: 3.14159 / 180  # 1 degree
+  hough_threshold: 100
+  hough_min_line_length: 100
+  hough_max_line_gap: 20
+  line_clustering_distance: 10
+
+# Performance Tuning
+performance:
+  # Enable model caching to avoid reloading
+  cache_models: true
+  # Preload models on startup
+  preload_models_on_init: false
+  # Max concurrent inference tasks (for future async support)
+  max_concurrent_inferences: 1
+
+# Feature Detection (Placeholder - not yet implemented)
+feature_detection:
+  enabled: false
+  detect_skylights: false
+  detect_chimneys: false
+  detect_vents: false
+
+# Damage Detection (Placeholder - not yet implemented)
+damage_detection:
+  enabled: false
+  detect_cracks: false
+  detect_missing_shingles: false
+  detect_torn_areas: false
+
+# Default Geometry Parameters (when 3D calibration unavailable)
+default_geometry:
+  roof_slope_degrees: 30.0
+  roof_orientation_degrees: 0.0
+  building_height_meters: 8.0
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  log_model_loading: true
+  log_inference_time: true
+  log_preprocessing: true
+  log_exceptions: true
