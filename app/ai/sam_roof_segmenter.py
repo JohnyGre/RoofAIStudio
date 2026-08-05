@@ -179,7 +179,7 @@ class SAMRoofSegmenter:
         results = []
         for i, (mask, score) in enumerate(zip(masks, scores)):
             contours, _ = cv2.findContours(
-                mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
             )
             if not contours:
                 continue
@@ -244,7 +244,7 @@ class SAMRoofSegmenter:
         results = []
         for mask, score in zip(masks, scores):
             contours, _ = cv2.findContours(
-                mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
             )
             if not contours:
                 continue
@@ -254,15 +254,15 @@ class SAMRoofSegmenter:
             if area < 50:
                 continue
 
-            epsilon = 0.003 * cv2.arcLength(best, True)
-            approx = cv2.approxPolyDP(best, epsilon, True)
+            # epsilon = 0.003 * cv2.arcLength(best, True)
+            # approx = cv2.approxPolyDP(best, epsilon, True)
 
             results.append(
                 {
                     "mask": mask,
                     "score": float(score),
                     "area": int(area),
-                    "contour": approx,
+                    "contour": best,
                     "box": (x1, y1, x2, y2),
                     "sam_time_ms": (time.time() - t0) * 1000,
                 }
@@ -285,16 +285,20 @@ class SAMRoofSegmenter:
         iou: float = 0.45,
         imgsz: int = 640,
         min_mask_area: int = 80,
+        prefer_yolo_seg: bool = True,
     ) -> List[Dict[str, Any]]:
         """
-        Full-auto: YOLO finds candidate boxes → SAM refines each.
+        Full-auto: prefer YOLO segmentation head (pixel-level) when the model
+        supports it, fall back to YOLO boxes + SAM refinement otherwise.
 
         Args:
             image: BGR image (any size; auto-resized to imgsz for YOLO step)
             conf: YOLO confidence threshold
             iou: YOLO NMS IoU threshold
             imgsz: YOLO inference size (best at model training size, usually 640)
-            min_mask_area: Minimum SAM mask area to keep (filters noise)
+            min_mask_area: Minimum mask area to keep (filters noise)
+            prefer_yolo_seg: If True and the YOLO model exposes a segmentation
+                head, use it directly. Set False to force the YOLO-box + SAM path.
 
         Returns:
             List of dicts, each with mask, class, confidence, contour, etc.
@@ -320,90 +324,173 @@ class SAMRoofSegmenter:
         )[0]
         yolo_time = time.time() - t0
 
+        if len(yolo_results.boxes) == 0 and conf > 0.10:
+            logger.info(f"YOLO: 0 boxes at conf={conf}, trying fallback conf=0.10")
+            yolo_results = self._yolo(
+                img_640, conf=0.10, iou=iou, imgsz=imgsz,
+                device=self.device, verbose=False
+            )[0]
+
         if len(yolo_results.boxes) == 0:
-            logger.info(f"YOLO: 0 boxes found (conf={conf})")
+            logger.info(f"YOLO: 0 boxes found")
             return []
+
+        # Ak má model segmentation head a je to preferované, použijeme YOLO maky
+        # priamo — sú trénované na tvoje triedy (slope_tri/trop/poly/min) a
+        # zodpovedajú tomu, čo vidíš v temp_yolo_test.py.
+        has_seg = (
+            prefer_yolo_seg
+            and getattr(yolo_results, "masks", None) is not None
+            and yolo_results.masks.data is not None
+            and len(yolo_results.masks.data) == len(yolo_results.boxes)
+        )
 
         boxes = yolo_results.boxes.xyxy.cpu().numpy()
         logger.info(
-            f"YOLO: {len(boxes)} boxes in {yolo_time*1000:.0f}ms (conf={conf})"
+            f"YOLO: {len(boxes)} boxes, has_seg={has_seg} in {yolo_time*1000:.0f}ms"
         )
 
-        # Step 2: SAM encodes image once, then refines each box
-        self._predictor.set_image(img_640)
-
-        sam_t0 = time.time()
         results = []
+        sam_total = 0.0
+        per_box_ms = 0.0
 
-        for i, box in enumerate(boxes):
-            cls_id = int(yolo_results.boxes.cls[i])
-            cls_name = self._yolo.names.get(cls_id, f"class_{cls_id}")
-            yolo_conf = float(yolo_results.boxes.conf[i])
+        if has_seg:
+            # === YOLO segmentation head — presne to, čo vidíš v YOLO obrázku ===
+            seg_t0 = time.time()
+            yolo_masks_data = yolo_results.masks.data.cpu().numpy()  # (N, H, W)
+            yolo_polys = yolo_results.masks.xy  # list of (N, 2) polygon arrays
 
-            try:
-                masks, scores, _ = self._predictor.predict(
-                    box=box[None, :],
-                    multimask_output=False,
-                )
-            except Exception as e:
-                logger.warning(f"SAM predict failed for box {i}: {e}")
-                continue
+            for i, box in enumerate(boxes):
+                cls_id = int(yolo_results.boxes.cls[i])
+                cls_name = self._yolo.names.get(cls_id, f"class_{cls_id}")
+                yolo_conf = float(yolo_results.boxes.conf[i])
 
-            if len(masks) == 0:
-                continue
+                mask = yolo_masks_data[i].astype(bool)
+                area = int(np.sum(mask))
 
-            mask = masks[0]
-            sam_score = float(scores[0]) if len(scores) > 0 else 0.0
-            area = int(np.sum(mask))
+                if area < min_mask_area:
+                    continue
 
-            if area < min_mask_area:
-                continue
+                # Preferuj YOLO polygon (už zjednodušený modelom), fallback na contour
+                poly = yolo_polys[i] if i < len(yolo_polys) else None
+                if poly is not None and len(poly) >= 3:
+                    contour = poly.astype(np.int32).reshape(-1, 1, 2)
+                else:
+                    cnts, _ = cv2.findContours(
+                        mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
+                    )
+                    if not cnts:
+                        continue
+                    contour = max(cnts, key=cv2.contourArea)
 
-            contours, _ = cv2.findContours(
-                mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-            )
-            if not contours:
-                continue
+                # Škáluj contour do originálnych pixelov
+                contour_scaled = (contour.astype(np.float32) * [scale_x, scale_y]).astype(np.int32)
 
-            best_contour = max(contours, key=cv2.contourArea)
-            epsilon = 0.004 * cv2.arcLength(best_contour, True)
-            approx = cv2.approxPolyDP(best_contour, epsilon, True)
-
-            # Scale contour back to original image coordinates
-            contour_scaled = (approx.astype(np.float32) * [scale_x, scale_y]).astype(
-                np.int32
-            )
-
-            results.append(
-                {
+                results.append({
                     "mask_640": mask,
                     "score": yolo_conf,
-                    "sam_score": sam_score,
+                    "sam_score": yolo_conf,  # YOLO conf ako fallback skóre
                     "area_640": area,
                     "class_name": cls_name,
                     "class_id": cls_id,
-                    "contour": contour_scaled,  # original coords
+                    "contour": contour_scaled,
                     "box_orig": (
                         int(box[0] * scale_x),
                         int(box[1] * scale_y),
                         int(box[2] * scale_x),
                         int(box[3] * scale_y),
                     ),
-                    "sam_time_ms": 0,  # filled below
-                }
+                    "sam_time_ms": 0,
+                })
+
+            sam_total = time.time() - seg_t0
+            per_box_ms = sam_total / max(len(boxes), 1) * 1000
+            for r in results:
+                r["sam_time_ms"] = per_box_ms
+            logger.info(
+                f"YOLO seg used: {len(results)}/{len(boxes)} masks in {sam_total:.1f}s"
+            )
+        else:
+            # === Fallback: YOLO BB → SAM refine (pôvodný flow) ===
+            self._predictor.set_image(img_640)
+            sam_t0 = time.time()
+
+            for i, box in enumerate(boxes):
+                cls_id = int(yolo_results.boxes.cls[i])
+                cls_name = self._yolo.names.get(cls_id, f"class_{cls_id}")
+                yolo_conf = float(yolo_results.boxes.conf[i])
+
+                try:
+                    masks, scores, _ = self._predictor.predict(
+                        box=box[None, :],
+                        multimask_output=False,
+                    )
+                except Exception as e:
+                    logger.warning(f"SAM predict failed for box {i}: {e}")
+                    continue
+
+                if len(masks) == 0:
+                    continue
+
+                mask = masks[0]
+                sam_score = float(scores[0]) if len(scores) > 0 else 0.0
+
+                # Klipni SAM masku na YOLO bounding box.
+                x1b, y1b, x2b, y2b = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+                h_m, w_m = mask.shape
+                y1c = max(0, min(h_m, y1b))
+                y2c = max(0, min(h_m, y2b))
+                x1c = max(0, min(w_m, x1b))
+                x2c = max(0, min(w_m, x2b))
+                if y1c > 0:
+                    mask[:y1c, :] = False
+                if y2c < h_m:
+                    mask[y2c:, :] = False
+                if x1c > 0:
+                    mask[:, :x1c] = False
+                if x2c < w_m:
+                    mask[:, x2c:] = False
+
+                area = int(np.sum(mask))
+
+                if area < min_mask_area:
+                    continue
+
+                contours, _ = cv2.findContours(
+                    mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
+                )
+                if not contours:
+                    continue
+
+                best_contour = max(contours, key=cv2.contourArea)
+
+                contour_scaled = (best_contour.astype(np.float32) * [scale_x, scale_y]).astype(np.int32)
+
+                results.append({
+                    "mask_640": mask,
+                    "score": yolo_conf,
+                    "sam_score": sam_score,
+                    "area_640": area,
+                    "class_name": cls_name,
+                    "class_id": cls_id,
+                    "contour": contour_scaled,
+                    "box_orig": (
+                        int(box[0] * scale_x),
+                        int(box[1] * scale_y),
+                        int(box[2] * scale_x),
+                        int(box[3] * scale_y),
+                    ),
+                    "sam_time_ms": 0,
+                })
+
+            sam_total = time.time() - sam_t0
+            per_box_ms = sam_total / max(len(boxes), 1) * 1000
+            for r in results:
+                r["sam_time_ms"] = per_box_ms
+            logger.info(
+                f"SAM refined (fallback): {len(results)}/{len(boxes)} boxes in {sam_total:.1f}s"
             )
 
-        sam_total = time.time() - sam_t0
-        per_box = sam_total / max(len(boxes), 1) * 1000
-
-        # Fill per-box timing
-        for r in results:
-            r["sam_time_ms"] = per_box
-
-        logger.info(
-            f"SAM refined: {len(results)}/{len(boxes)} boxes in "
-            f"{sam_total:.1f}s ({per_box:.0f}ms each)"
-        )
         logger.info(f"Total: {(time.time()-t0)*1000:.0f}ms")
 
         return results

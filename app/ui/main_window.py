@@ -340,7 +340,7 @@ class MainWindow(QMainWindow):
             self.status_bar.set_status_message("Loading SAM + YOLO models...")
             QApplication.processEvents()
             try:
-                self._single_roof_analyzer = SingleRoofAnalyzer(yolo_conf=0.25, min_mask_area=80)
+                self._single_roof_analyzer = SingleRoofAnalyzer(yolo_conf=0.15, min_mask_area=80)
                 self._single_roof_analyzer.load()
                 self.status_bar.set_status_message("Models loaded. Ready.")
             except Exception as e:
@@ -355,7 +355,7 @@ class MainWindow(QMainWindow):
         self.status_bar.set_status_message(f"Fetching satellite image for: {address}...")
         QApplication.processEvents()
 
-        result = self._single_roof_analyzer.analyze_address(address.strip())
+        result = self._single_roof_analyzer.analyze_address(address.strip(), debug_mode=True)
 
         if not result["success"]:
             QMessageBox.warning(self, "Fetch Failed", result.get("error", "Unknown error"))
@@ -385,13 +385,14 @@ class MainWindow(QMainWindow):
 
         # Summary
         best = result.get("best_plane")
-        top_n = len(result["planes"])
+        total_planes_str = str(result.get("total_planes_center", len(result.get("planes", []))))
+        area_m2 = result.get("total_area_m2", 0)
+        perimeter_m = result.get("total_perimeter_m", 0)
         status_msg = (
-            f"Fetched: {address} - {result["total_planes"]} planes"
-            + (f", best: {best["class_name"]} SAM={best["sam_score"]:.3f}" if best else "")
+            f"Fetched: {address} - {total_planes_str} planes | Total Area: {area_m2:.1f} m² | Perimeter: {perimeter_m:.1f} m"
         )
         self.status_bar.set_status_message(status_msg)
-        print(f"Fetch by Address: {result["total_planes"]} planes for {address}")
+        print(f"Fetch by Address: {total_planes_str} planes for {address} | Area: {area_m2:.1f} m² | Perimeter: {perimeter_m:.1f} m")
 
     def _on_about(self) -> None:
         self.status_bar.set_status_message("Action: About")

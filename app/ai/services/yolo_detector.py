@@ -277,7 +277,7 @@ class YOLODetector:
                         mask_np = cv2.resize(
                             mask_np,
                             (image.shape[1], image.shape[0]),
-                            interpolation=cv2.INTER_LINEAR
+                            interpolation=cv2.INTER_NEAREST
                         )
 
                     # Binarize

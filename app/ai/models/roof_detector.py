@@ -72,7 +72,7 @@ class RoofDetector(VisionDetector):
                     self.sam_segmenter = SAMRoofSegmenter(
                         model_type="vit_b",
                         yolo_model_path=kwargs.get(
-                            "sam_yolo_path", "ai_models/roof_finetuned.pt"
+                            "sam_yolo_path", "ai_models/roof_gmaps_v2.pt"
                         ),
                         device=device,
                     )
@@ -115,69 +115,75 @@ class RoofDetector(VisionDetector):
 
         all_results: List[Union[DetectionResult, SegmentationResult, GeometryPredictionResult]] = []
 
-        # 1. Hybrid roof plane detection (primary)
+        # 1. Broad-phase roof region detection using OpenCV
         if kwargs.get("enable_planes", True):
-            logger.debug("Running HybridRoofDetector (YOLO + OpenCV + color filter)...")
-            planes = self.hybrid_detector.detect(
+            logger.debug("Running HybridRoofDetector (OpenCV only) for broad-phase detection...")
+            # Force OpenCV-only for the initial pass
+            opencv_kwargs = kwargs.copy()
+            opencv_kwargs['use_yolo'] = False
+            opencv_kwargs['use_opencv'] = True
+            
+            roof_regions = self.hybrid_detector.detect(
                 image,
-                use_yolo=kwargs.get("use_yolo", True),
-                use_opencv=kwargs.get("use_opencv", True),
-                max_results=kwargs.get("max_results", 15),
-                min_roof_score=kwargs.get("min_roof_score", 0.25),
-                yolo_conf=kwargs.get("yolo_conf", 0.2),
+                **opencv_kwargs
             )
-            all_results.extend(planes)
-            logger.info(f"RoofDetector: {len(planes)} roof planes")
+            all_results.extend(roof_regions)
+            logger.info(f"RoofDetector: Found {len(roof_regions)} broad roof regions with OpenCV.")
 
-        # 2. SAM zero-shot refinement (new in v0.5.0)
-        if kwargs.get("enable_sam", True) and self.sam_segmenter is not None:
-            logger.debug("Running SAM zero-shot refinement...")
-            sam_results = self.sam_segmenter.segment_auto(
-                image,
-                conf=kwargs.get("sam_conf", 0.25),
-                imgsz=kwargs.get("sam_imgsz", 640),
-                min_mask_area=kwargs.get("sam_min_area", 80),
-            )
-            for r in sam_results:
-                # Convert SAM result to DetectionResult
-                try:
-                    from app.ai.ai_result import DetectionResult, PolygonGeometry
-                    # Build polygon geometry from SAM contour
-                    verts = [
-                        (float(pt[0][0]), float(pt[0][1]))
-                        for pt in r.get("contour", [])
-                    ]
-                    if len(verts) < 3:
-                        # Fallback: create polygon from box corners
-                        bx = r.get("box_orig", (0, 0, 100, 100))
-                        verts = [
-                            (float(bx[0]), float(bx[1])),
-                            (float(bx[2]), float(bx[1])),
-                            (float(bx[2]), float(bx[3])),
-                            (float(bx[0]), float(bx[3])),
-                        ]
-                    geometry = PolygonGeometry(vertices=verts)
-                    dr = DetectionResult(
-                        class_name=r.get("class_name", "roof_plane"),
-                        geometry=geometry,
-                        confidence=r["sam_score"],
-                        metadata={
-                            "source": f"sam_{r.get('class_name', 'unknown')}",
-                            "yolo_confidence": r["score"],
-                            "sam_score": r["sam_score"],
-                            "mask_area": r.get("area_640", 0),
-                            "polygon_vertices": [
-                                (int(pt[0][0]), int(pt[0][1]))
-                                for pt in r.get("contour", [])
-                            ],
-                        },
+            # 2. Fine-grained polygon detection within each roof region using SAM/YOLO
+            if kwargs.get("enable_sam", True) and self.sam_segmenter is not None:
+                logger.debug("Running SAM zero-shot refinement within each broad roof region...")
+                for region in roof_regions:
+                    # Extract the bounding box of the detected region
+                    x_min, y_min, x_max, y_max = region.geometry.x_min, region.geometry.y_min, region.geometry.x_max, region.geometry.y_max
+                    
+                    # Crop the image to the detected region
+                    cropped_image = image[int(y_min):int(y_max), int(x_min):int(x_max)]
+
+                    if cropped_image.size == 0:
+                        continue
+
+                    # Run SAM on the cropped image
+                    sam_results = self.sam_segmenter.segment_auto(
+                        cropped_image,
+                        conf=kwargs.get("sam_conf", 0.25),
+                        imgsz=kwargs.get("sam_imgsz", 640),
+                        min_mask_area=kwargs.get("sam_min_area", 80),
                     )
-                    all_results.append(dr)
-                except Exception as e:
-                    logger.warning(f"SAM result conversion failed: {e}")
-            logger.info(f"RoofDetector: {len(sam_results)} SAM-refined planes")
 
-        # 3. Roof lines
+                    # Convert SAM results to DetectionResult and adjust coordinates
+                    for r in sam_results:
+                        try:
+                            from app.ai.ai_result import DetectionResult, PolygonGeometry
+                            # Adjust polygon vertices to the original image coordinates
+                            verts = [
+                                (float(pt[0][0]) + x_min, float(pt[0][1]) + y_min)
+                                for pt in r.get("contour", [])
+                            ]
+                            if len(verts) < 3:
+                                continue
+                            
+                            geometry = PolygonGeometry(vertices=verts)
+                            dr = DetectionResult(
+                                class_name=r.get("class_name", "roof_polygon"),
+                                geometry=geometry,
+                                confidence=r["sam_score"],
+                                metadata={
+                                    "source": f"sam_in_opencv_region_{r.get('class_name', 'unknown')}",
+                                    "yolo_confidence": r["score"],
+                                    "sam_score": r["sam_score"],
+                                    "mask_area": r.get("area_640", 0),
+                                },
+                            )
+                            all_results.append(dr)
+                        except Exception as e:
+                            logger.warning(f"SAM result conversion failed: {e}")
+                logger.info(f"RoofDetector: Refined regions with SAM.")
+        
+        # The original YOLO and SAM passes are now conditional or removed
+        # to avoid duplication. We rely on the new two-step process.
+        
+        # 3. Roof lines (can still be run on the whole image)
         if kwargs.get("enable_lines", True):
             logger.debug("Running RoofLineDetector...")
             lines = self.line_detector.detect(image)

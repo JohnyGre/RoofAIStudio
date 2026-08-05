@@ -79,6 +79,26 @@ After installation, you can run the application:
 
 The application window should appear.
 
+## Príklad analýzy strešného segmentu (sektor y5)
+
+Podľa výpočtov má sektor y5 plochu 76 m².
+
+- **Dolná základňa (odkvap):** cca $10,47\,\text{m}$
+- **Horná základňa (hrebeň):** cca $5,0\,\text{m}$
+- **Výška spádu:** $5,76\,\text{m}$
+
+### Výpočet výškového presahu / výšky hrebeňa (h)
+
+Výšku hrebeňa nad rovinou odkvapu vypočítaš pomocou Pytagorovej vety $c^2 = a^2 + h^2$:
+
+$h = \sqrt{c^2 - a^2} = \sqrt{5,76^2 - 5,25^2} = \sqrt{33,1776 - 27,5625} = \sqrt{5,6151} \approx 2,37\,\text{m}$
+
+**Výškový presah (výška strechy od odkvapu po vrchol hrebeňa): 2,37 m.**
+
+### Výpočet dĺžky nárožia
+
+Dĺžka nárožia: $22 \text{ ks} \text{ korytiek} \times 0{,}41\text{ m} \approx \mathbf{9{,}02\text{ m}}$.
+
 ## Development
 
 ### Running Tests

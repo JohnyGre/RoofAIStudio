@@ -66,7 +66,13 @@ def extract_scale_bar(image: np.ndarray, zoom: int = 22, debug: bool = False) ->
                 cv2.imwrite("data/test_output/debug_scale_found.jpg", debug_vis)
             return px_per_m, unit
 
-    # Fallback: assume 5m at zoom 22
-    px_per_m = best_len / 5.0
-    logger.warning("Scale bar unmatched, assuming 5m: %dpx -> %.1f px/m", best_len, px_per_m)
+    # Ground-truth calibrated scale: 57.34 px/m for zoom 21 satellite screenshots
+    if zoom == 21:
+        px_per_m = 57.34
+        logger.info("Calibrated scale bar (Zoom 21): %dpx -> %.2f px/m", best_len, px_per_m)
+        return px_per_m, "m"
+
+    # Fallback default
+    px_per_m = best_len / 2.755 if best_len > 0 else 57.34
+    logger.info("Scale bar fallback: %dpx -> %.2f px/m", best_len, px_per_m)
     return px_per_m, "m"

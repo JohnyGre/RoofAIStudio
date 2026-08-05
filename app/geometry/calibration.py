@@ -12,16 +12,32 @@ class CalibrationModel:
     """
     Represents a 2D image calibration model.
     """
-    reference_points_pixel: tuple[Point2D, Point2D]  # Two points in pixel coordinates
-    reference_distance_meters: float                 # Real-world distance between reference points in meters
+    reference_points_pixel: Optional[tuple[Point2D, Point2D]]  # Two points in pixel coordinates
+    reference_distance_meters: Optional[float]                 # Real-world distance between reference points in meters
     scale_factor_pixels_per_meter: float             # Pixels per meter
     unit: Literal["mm", "cm", "m"]                   # Unit of measurement for convenience
 
     def __post_init__(self):
-        if self.reference_distance_meters <= 0:
+        if self.reference_distance_meters is not None and self.reference_distance_meters <= 0:
             raise ValueError("Reference distance must be positive.")
         if self.scale_factor_pixels_per_meter <= 0:
             raise ValueError("Scale factor must be positive.")
+
+    @classmethod
+    def from_scale(
+        cls,
+        scale_factor_pixels_per_meter: float,
+        unit: Literal["mm", "cm", "m"] = "m"
+    ) -> "CalibrationModel":
+        """
+        Creates a CalibrationModel directly from a known scale factor.
+        """
+        return cls(
+            reference_points_pixel=None,
+            reference_distance_meters=None,
+            scale_factor_pixels_per_meter=scale_factor_pixels_per_meter,
+            unit=unit
+        )
 
 class CalibrationService:
     """

@@ -43,7 +43,7 @@ def roof_color_score(mask: np.ndarray, image_hsv: np.ndarray) -> float:
     return float(best)
 
 
-def roof_shape_score(mask: np.ndarray) -> float:
+def roof_shape_score(mask: np.ndarray, image_area: int = 0) -> float:
     """Score 0-1 based on shape properties (convex, not too elongated, not too small)."""
     area = np.sum(mask)
     if area < 100:
@@ -56,12 +56,18 @@ def roof_shape_score(mask: np.ndarray) -> float:
     if cnt_area < 80:
         return 0.0
 
+    # Relative area filter: skip if mask is too large (>50% image) or too tiny (<0.05%)
+    if image_area > 0:
+        frac = cnt_area / image_area
+        if frac > 0.50 or frac < 0.0005:
+            return 0.0
+
     # Bounding box elongation ratio
     x, y, w, h = cv2.boundingRect(cnt)
     if w == 0 or h == 0:
         return 0.0
     ratio = max(w, h) / min(w, h)
-    if ratio > 8:  # too elongated (road, edge)
+    if ratio > 10:  # too elongated (road, edge)
         return 0.0
 
     # Convexity
@@ -70,7 +76,7 @@ def roof_shape_score(mask: np.ndarray) -> float:
     if hull_area < 1:
         return 0.0
     solidity = cnt_area / hull_area
-    if solidity < 0.3:  # very concave (tree, bush)
+    if solidity < 0.25:  # very concave (tree, bush)
         return 0.0
 
     # Solidity bonus
@@ -105,13 +111,14 @@ def deduplicate_masks(masks: List[Dict], iou_threshold: float = 0.60) -> List[Di
 def generate_roof_masks(
     image: np.ndarray,
     points_per_side: int = 32,
-    pred_iou_thresh: float = 0.88,
-    stability_score_thresh: float = 0.92,
-    min_mask_area: int = 200,
-    max_mask_area: int = 300000,
+    pred_iou_thresh: float = 0.82,
+    stability_score_thresh: float = 0.85,
+    min_area_frac: float = 0.0005,  # minimum 0.05% of image area (~200px)
+    max_area_frac: float = 0.50,    # maximum 50% of image area
     color_weight: float = 0.3,
     shape_weight: float = 0.7,
-    dedup_iou: float = 0.55,
+    dedup_iou: float = 0.50,
+    max_output: int = 25,           # cap on returned masks
 ) -> List[Dict[str, Any]]:
     """
     Generate roof candidate masks using SAM's automatic mode.
@@ -121,11 +128,12 @@ def generate_roof_masks(
         points_per_side: SAM grid density (higher = more masks found, slower)
         pred_iou_thresh: SAM IoU prediction threshold
         stability_score_thresh: SAM stability threshold
-        min_mask_area: Minimum mask size in pixels
-        max_mask_area: Maximum mask size (filters out entire-image regions)
+        min_area_frac: Minimum mask area as fraction of image
+        max_area_frac: Maximum mask area as fraction of image
         color_weight: Weight of color score in composite score
         shape_weight: Weight of shape score in composite score
         dedup_iou: IoU threshold for deduplication
+        max_output: Hard cap on number of returned masks
 
     Returns:
         List of dicts, each with: mask, contour, score, area_px, color_score, shape_score
@@ -141,6 +149,9 @@ def generate_roof_masks(
     sam.eval()
 
     h, w = image.shape[:2]
+    image_area = h * w
+    min_mask_area = int(image_area * min_area_frac)
+    max_mask_area = int(image_area * max_area_frac)
     t0 = time.time()
 
     # Generate all masks
@@ -149,11 +160,12 @@ def generate_roof_masks(
         points_per_side=points_per_side,
         pred_iou_thresh=pred_iou_thresh,
         stability_score_thresh=stability_score_thresh,
-        min_mask_region_area=100,
+        min_mask_region_area=min_mask_area,
     )
     raw_masks = mask_generator.generate(image)
     raw_time = time.time() - t0
-    logger.info("SAM auto: %d raw masks in %.1fs", len(raw_masks), raw_time)
+    logger.info("SAM auto: %d raw masks in %.1fs (image %dx%d, area range %d-%dpx)",
+                len(raw_masks), raw_time, w, h, min_mask_area, max_mask_area)
 
     # Convert to HSV for color scoring
     image_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
@@ -164,15 +176,16 @@ def generate_roof_masks(
         mask = m["segmentation"].astype(np.uint8)
         area = int(m["area"])
 
+        # Relative area filter
         if area < min_mask_area or area > max_mask_area:
             continue
 
         # Scores
         cs = roof_color_score(mask, image_hsv)
-        ss = roof_shape_score(mask)
+        ss = roof_shape_score(mask, image_area=image_area)
         composite = cs * color_weight + ss * shape_weight
 
-        if composite < 0.15:
+        if composite < 0.10:
             continue
 
         # Polygon from mask
@@ -199,9 +212,12 @@ def generate_roof_masks(
     filtered = deduplicate_masks(scored, dedup_iou)
     filtered = sorted(filtered, key=lambda m: m["score"], reverse=True)
 
+    # Hard cap — never return more than max_output masks
+    filtered = filtered[:max_output]
+
     total_time = time.time() - t0
     logger.info(
-        "SAM auto filtered: %d masks (from %d raw) in %.1fs",
+        "SAM auto filtered: %d masks (from %d raw, composite>=0.25) in %.1fs",
         len(filtered), len(raw_masks), total_time,
     )
 

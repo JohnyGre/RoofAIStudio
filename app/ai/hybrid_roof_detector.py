@@ -68,17 +68,19 @@ class RoofColorClassifier:
         std_bgr = region_pixels.std(axis=0)
 
         # Reject bright white / sky blue / grass green
-        if mean_bgr[0] > 200 and mean_bgr[1] > 200 and mean_bgr[2] > 200:
+        if mean_bgr[0] > 200 and mean_bgr[1] > 200 and mean_bgr[2] > 200: # Almost white
             return 0.0
-        if mean_bgr[0] > mean_bgr[2] and mean_bgr[1] > mean_bgr[2] * 0.7:
+        if mean_bgr[0] > mean_bgr[2] and mean_bgr[1] > mean_bgr[2]: # Sky blue / cyan
             return 0.0
-        if mean_bgr[0] < 60 and mean_bgr[1] > 100:
-            return 0.0
+        # Aggressively reject green/yellow-green (grass, trees)
+        # if green is dominant and not balanced by red/blue
+        if mean_bgr[1] > mean_bgr[0] * 1.1 and mean_bgr[1] > mean_bgr[2] * 1.1:
+            return 0.01 # Very low score instead of 0.0 to allow for borderline cases
 
         saturation = float(std_bgr.mean())
-        if saturation < 5:
-            return 0.1
-        if saturation > 80:
+        if saturation < 5: # Very low saturation (grayscale)
+            return 0.01
+        if saturation > 80: # Very high saturation (unnatural)
             return 0.2
 
         for (low, high) in cls.ROOF_COLORS.values():

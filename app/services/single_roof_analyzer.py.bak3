@@ -21,8 +21,6 @@ import numpy as np
 
 from app.services.satellite_fetcher import SatelliteImageFetcher
 from app.core.logger import setup_logging
-from app.services.roof_measurement_extractor import RoofMeasurementExtractor, CalibrationModel
-from app.ai.services.yolo_detector import YOLODetectionResult, SegmentationMask, DetectionBox
 
 logger = setup_logging()
 
@@ -74,7 +72,7 @@ class SingleRoofAnalyzer:
 
             self._segmenter = SAMRoofSegmenter(
                 model_type="vit_b",
-                yolo_model_path="ai_models/roof_gmaps_v2.pt", # Používame model roof_gmaps_v2 na žiadosť
+                yolo_model_path="ai_models/roof_finetuned.pt", # Použijeme náš finálny model
                 device=self.device,
             )
             self._segmenter.load()
@@ -178,10 +176,22 @@ class SingleRoofAnalyzer:
         logger.info("Center building: %d planes (from %d groups)",
                       len(center_planes), self._last_group_count)
 
-        # Step 5: Merge close planes - DOČASNE VYPNUTÉ kvôli problému s konvexným obalom
-        # merged_planes = self._merge_close_planes(center_planes, threshold=50)
-        # logger.info(f"Merged close planes: {len(center_planes)} -> {len(merged_planes)} planes")
-        # center_planes = merged_planes
+        # Step 6a: Filter non-solid shapes (like trees)
+        solid_planes = []
+        for p in center_planes:
+            contour = p.get("contour")
+            if contour is not None and len(contour) > 2:
+                area = cv2.contourArea(contour)
+                hull = cv2.convexHull(contour)
+                hull_area = cv2.contourArea(hull)
+                if hull_area > 0:
+                    solidity = float(area) / hull_area
+                    if solidity >= 0.70: # Keep only reasonably convex shapes
+                        solid_planes.append(p)
+                    else:
+                        logger.debug(f"Filtering out non-solid plane with solidity: {solidity:.2f}")
+        logger.info(f"Solidity filter: {len(center_planes)} -> {len(solid_planes)} planes")
+        center_planes = solid_planes
 
         if debug_mode:
             vis_center = self._draw_debug_sam(img, center_planes, (255, 255, 0)) # Cyan
@@ -192,10 +202,10 @@ class SingleRoofAnalyzer:
         before_area = len(center_planes)
         center_planes = [
             p for p in center_planes
-            if (p.get("mask_640") is not None
-                and isinstance(p["mask_640"], np.ndarray)
-                and p["mask_640"].sum() >= min_px)
-            or (p.get("area_640", 0) >= min_px)
+            if (p.get("mask") is not None
+                and isinstance(p["mask"], np.ndarray)
+                and p["mask"].sum() >= min_px)
+            or (p.get("area_640", p.get("area_px", 0)) >= min_px)
         ]
         logger.info("Area filter (>= %dpx): %d -> %d planes",
                     min_px, before_area, len(center_planes))
@@ -208,56 +218,8 @@ class SingleRoofAnalyzer:
             # ... (auto-zoom logic remains the same)
             pass
 
-        # Step 8: Nový krok s RoofMeasurementExtractor
-        calib_model = CalibrationModel.from_scale(scale_factor_pixels_per_meter=px_per_m, unit="m")
-        extractor = RoofMeasurementExtractor(
-            calibration=calib_model,
-            ridge_height_m=3.0,  # TODO: Získať z UI alebo nastavení
-            polygon_epsilon=0.0,  # 0 = zachovať SAM masku bez Douglas-Peucker orezania
-            min_area_px=self.min_mask_area
-        )
-
-        # Preformátovanie detekcií pre extraktor
-        yolo_masks = []
-        orig_h, orig_w = img.shape[:2]
-        for p in top_planes:
-            if p.get("class_name") == "slope_flat":
-                 logger.info(f"DEBUG: Green plane before formatting - Contour points: {len(p.get('contour', []))}")
-            box = DetectionBox(x1=0, y1=0, x2=orig_w, y2=orig_h, confidence=p.get("score", 0), class_id=p.get("class_id", 0), class_name=p.get("class_name", "roof_plane"))
-            
-            mask_640 = p.get("mask_640")
-            if mask_640 is None:
-                continue
-
-            # Preškálovanie masky z 640x640 na pôvodnú veľkosť obrázka
-            mask_orig_size = cv2.resize(mask_640.astype(np.uint8), (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
-            
-            yolo_masks.append(SegmentationMask(mask=mask_orig_size, box=box, area=int(mask_orig_size.sum())))
-        
-        yolo_result = YOLODetectionResult(masks=yolo_masks, boxes=[], image_shape=img.shape, inference_time_ms=0, model_name="manual")
-        
-        measurements = extractor.extract(yolo_result)
-
-        # Preformátovanie výstupu z extraktora pre zvyšok aplikácie
-        planes_out = []
-        color_names = ["Zelená", "Modrá", "Červená", "Akvamarínová", "Fialová", "Žltá"]
-        for i, m in enumerate(measurements):
-            # Prepoj s pôvodnou top_planes detekciou, aby sme mohli preposlať YOLO BB
-            # (poradie sa zachováva — extractor vracia plochy zoradené zostupne ako top_planes)
-            src = top_planes[i] if i < len(top_planes) else None
-            box_orig = src.get("box_orig") if src else None
-            planes_out.append({
-                "id": m.plane_id,
-                "class_name": m.class_name,
-                "color_name": color_names[i % len(color_names)],
-                "score": m.confidence,
-                "area_m2": m.true_area_m2,
-                "perimeter_m": m.perimeter_m,
-                "contour": [[list(pt)] for pt in m.polygon_px], # HACK: Pre spätnú kompatibilitu s kreslením
-                "edge_details": [{"length_m": np.linalg.norm(np.array(m.polygon_m[j]) - np.array(m.polygon_m[(j + 1) % len(m.polygon_m)]))} for j in range(len(m.polygon_m))] if m.polygon_m else [],
-                "yolo_box": box_orig,  # pre YOLO BB overlay v _draw_merged
-            })
-
+        # Step 8: Clean output
+        planes_out = self._format_planes(top_planes, px_per_m)
         best_plane = planes_out[0] if planes_out else None
 
         # Step 9: Visualization (final user-facing)
@@ -365,7 +327,7 @@ class SingleRoofAnalyzer:
         # DBSCAN clustering
         try:
             from sklearn.cluster import DBSCAN
-            clusteringdb = DBSCAN(eps=250, min_samples=1).fit(centroids) # Zvýšená tolerancia na zhlukovanie
+            clusteringdb = DBSCAN(eps=120, min_samples=1).fit(centroids)
             labels = clusteringdb.labels_
         except Exception:
             # Fallback: single group
@@ -426,16 +388,10 @@ class SingleRoofAnalyzer:
             results = []
             for m in masks:
                 mask_uint8 = m["mask"].astype(np.uint8)
-                # Use approxPolyDP to have control over simplification
                 cnts, _ = cv2.findContours(
-                    mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE,
+                    mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
                 )
-                if cnts:
-                    contour = max(cnts, key=cv2.contourArea)
-                    epsilon = 0.0005 * cv2.arcLength(contour, True)
-                    contour = cv2.approxPolyDP(contour, epsilon, True)
-                else:
-                    contour = np.array([])
+                contour = max(cnts, key=cv2.contourArea) if cnts else np.array([])
                 results.append({
                     "class_name": "roof_plane",
                     "score": 0.0,
@@ -499,6 +455,79 @@ class SingleRoofAnalyzer:
         return sorted(keep, key=lambda r: r["composite_score"], reverse=True)
 
     # ------------------------------------------------------------------
+    # Output formatting
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _simplify(contour):
+        """Douglas-Peucker simplification."""
+        import cv2, numpy as np
+        if contour is None or len(contour) < 3:
+            return contour
+        if contour.ndim == 3:
+            pts = contour.reshape(-1, 2).astype(np.float32)
+        else:
+            pts = contour.astype(np.float32)
+        if len(pts) < 3:
+            return contour
+        peri = cv2.arcLength(pts.astype(np.float32).reshape(-1, 1, 2), True)
+        approx = cv2.approxPolyDP(pts.astype(np.float32).reshape(-1, 1, 2), 0.015 * peri, True)
+        if len(approx) < 3:
+            return contour
+        return approx.astype(np.int32)
+    def _format_planes(self, planes: List[Dict], px_per_m: Optional[float]) -> List[Dict]:
+        """Format plane data for API output with real-world dimensions and perimeters."""
+        out = []
+
+        color_names = [
+            "Zelená", "Modrá", "Červená", "Akvamarínová", "Fialová", "Žltá",
+            "Limetková", "Svetlomodrá", "Oranžová", "Ružová", "Tmavofialová", "Svetlozelená"
+        ]
+        for idx_r, r in enumerate(planes):
+            contour = r.get("contour", [])
+            area_m2 = None
+            perimeter_m = None
+            edge_lengths_m = []
+            area_px = int(r.get("area_px", r.get("area_640", 0)))
+            c_name = color_names[idx_r % len(color_names)]
+            
+            reg = self._simplify(contour)
+            target_poly = reg if len(reg) > 0 and reg.ndim == 3 else contour
+            
+            if len(target_poly) > 0:
+                pts = target_poly.reshape(-1, 2)
+                perimeter_px = float(cv2.arcLength(pts, True))
+                if px_per_m is not None and px_per_m > 0:
+                    if area_px > 0:
+                        area_m2 = round(area_px / (px_per_m ** 2), 1)
+                    perimeter_m = round(perimeter_px / px_per_m, 1)
+                    for j in range(len(pts)):
+                        p1 = pts[j]
+                        p2 = pts[(j + 1) % len(pts)]
+                        dist_px = float(np.linalg.norm(p2 - p1))
+                        edge_lengths_m.append(round(dist_px / px_per_m, 1))
+
+            out.append({
+                "class_name": r.get("class_name", "unknown"),
+                "yolo_score": float(r.get("score", 0)),
+                "sam_score": float(r.get("sam_score", 0)),
+                "composite_score": float(r.get("composite_score", 0)),
+                "source": r.get("source", "yolo"),
+                "color_name": c_name,
+                "area_px": area_px,
+                "area_m2": area_m2,
+                "perimeter_m": perimeter_m,
+                "edge_lengths_m": edge_lengths_m,
+                "contour": contour,
+                "regularized_contour": reg,
+                "vertices": (
+                    [(int(pt[0][0]), int(pt[0][1])) for pt in reg]
+                    if len(reg) > 0 and reg.ndim == 3 else []
+                ),
+            })
+        return out
+
+    # ------------------------------------------------------------------
     # Drawing
     # ------------------------------------------------------------------
 
@@ -511,40 +540,57 @@ class SingleRoofAnalyzer:
             (0, 255, 0), (255, 0, 0), (0, 0, 255),
             (255, 255, 0), (255, 0, 255), (0, 255, 255),
             (128, 255, 0), (255, 128, 0), (0, 128, 255),
+            (128, 0, 255), (255, 0, 128), (0, 255, 128),
         ]
-        vis = image.copy()
         overlay = image.copy()
-
         for i, p in enumerate(planes):
-            contour = np.array(p["contour"]).astype(np.int32)
-            if len(contour) < 3:
-                continue
-
-            # NO Simplify for clean drawing
-            # hull = cv2.convexHull(contour)
-
             color = colors[i % len(colors)]
-            cv2.fillPoly(overlay, [contour], color)
-            cv2.polylines(vis, [contour], True, (255, 255, 255), 1, cv2.LINE_AA)
+            source = p.get("source", "yolo")
+            contour = p.get("regularized_contour", p.get("contour", []))
+            if len(contour) > 0 and contour.ndim == 3:
+                poly = contour.reshape(-1, 2).astype(np.int32)
+                cv2.fillPoly(overlay, [poly], color)
+                edge_color = color if source == "yolo" else (255, 255, 255)
+                cv2.polylines(overlay, [poly], True, edge_color, 2)
+                cx, cy = int(np.mean(poly[:, 0])), int(np.mean(poly[:, 1]))
+                prefix = "Y" if source == "yolo" else "S"
+                area_m2 = p.get("area_m2")
+                perimeter_m = p.get("perimeter_m")
+                
+                if area_m2 and perimeter_m:
+                    text = f"{prefix}{i} {area_m2:.0f}m2 (P={perimeter_m:.1f}m)"
+                elif area_m2:
+                    text = f"{prefix}{i} {area_m2:.0f}m2"
+                else:
+                    text = f"{prefix}{i} {p.get('area_px', 0)}px"
+                    
+                (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)
+                cv2.rectangle(
+                    overlay,
+                    (cx - tw // 2 - 2, cy - th - 2),
+                    (cx + tw // 2 + 2, cy + 2),
+                    (0, 0, 0), -1,
+                )
+                cv2.putText(
+                    overlay, text, (cx - tw // 2, cy),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1,
+                )
 
-            # Get centroid for label
-            M = cv2.moments(contour)
-            if M["m00"] > 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
-
-                # YOLO class + area (e.g. "slope_trop 342m2")
-                class_name = p.get("class_name", "roof")
-                area_str = f'{class_name} {p.get("area_m2", 0):.0f}m2'
-                cv2.putText(vis, area_str, (cx - 20, cy - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,0), 2, cv2.LINE_AA)
-                cv2.putText(vis, area_str, (cx - 20, cy - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,255,255), 1, cv2.LINE_AA)
-
-                # Confidence + perimeter (e.g. "conf=0.87  P=117.6m")
-                conf_str = f'conf={p.get("score", 0):.2f}  P={p.get("perimeter_m", 0):.1f}m'
-                cv2.putText(vis, conf_str, (cx - 20, cy + 10), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0,0,0), 2, cv2.LINE_AA)
-                cv2.putText(vis, conf_str, (cx - 20, cy + 10), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255,255,255), 1, cv2.LINE_AA)
-
-        return cv2.addWeighted(overlay, alpha, vis, 1 - alpha, 0)
+                # Draw edge segment dimension labels if px_per_m is available
+                edge_lengths = p.get("edge_lengths_m", [])
+                if px_per_m and edge_lengths and len(poly) == len(edge_lengths):
+                    for j in range(len(poly)):
+                        length_m = edge_lengths[j]
+                        if length_m and length_m >= 1.0:  # label edges >= 1m
+                            p1 = poly[j]
+                            p2 = poly[(j + 1) % len(poly)]
+                            mx, my = int((p1[0] + p2[0]) / 2), int((p1[1] + p2[1]) / 2)
+                            lbl = f"{length_m:.1f}m"
+                            cv2.putText(
+                                overlay, lbl, (mx, my),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1, cv2.LINE_AA
+                            )
+        return cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0)
 
     def unload(self):
         """Free models from memory."""
