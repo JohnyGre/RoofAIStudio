@@ -23,6 +23,8 @@ from app.services.satellite_fetcher import SatelliteImageFetcher
 from app.core.logger import setup_logging
 from app.services.roof_measurement_extractor import RoofMeasurementExtractor, CalibrationModel
 from app.ai.services.yolo_detector import YOLODetectionResult, SegmentationMask, DetectionBox
+from app.services.shape_regularizer import ShapeRegularizer
+from app.services.vertex_snapper import VertexSnapper
 
 logger = setup_logging()
 
@@ -61,6 +63,8 @@ class SingleRoofAnalyzer:
             backend="playwright",
         )
         self._segmenter = None
+        self._regularizer = ShapeRegularizer()
+        self._snapper = VertexSnapper()
         self._loaded = False
 
     # ------------------------------------------------------------------
@@ -242,6 +246,9 @@ class SingleRoofAnalyzer:
         planes_out = []
         color_names = ["Zelená", "Modrá", "Červená", "Akvamarínová", "Fialová", "Žltá"]
         for i, m in enumerate(measurements):
+            # Apply shape regularization
+            regularized_contour = self._regularizer.regularize(np.array(m.polygon_px, dtype=np.int32), m.class_name)
+
             # Prepoj s pôvodnou top_planes detekciou, aby sme mohli preposlať YOLO BB
             # (poradie sa zachováva — extractor vracia plochy zoradené zostupne ako top_planes)
             src = top_planes[i] if i < len(top_planes) else None
@@ -253,10 +260,13 @@ class SingleRoofAnalyzer:
                 "score": m.confidence,
                 "area_m2": m.true_area_m2,
                 "perimeter_m": m.perimeter_m,
-                "contour": [[list(pt)] for pt in m.polygon_px], # HACK: Pre spätnú kompatibilitu s kreslením
+                "contour": regularized_contour.tolist(), # Use regularized contour
                 "edge_details": [{"length_m": np.linalg.norm(np.array(m.polygon_m[j]) - np.array(m.polygon_m[(j + 1) % len(m.polygon_m)]))} for j in range(len(m.polygon_m))] if m.polygon_m else [],
                 "yolo_box": box_orig,  # pre YOLO BB overlay v _draw_merged
             })
+
+        # Snap vertices
+        planes_out = self._snapper.snap_planes(planes_out, threshold_px=15)
 
         best_plane = planes_out[0] if planes_out else None
 
