@@ -23,7 +23,7 @@ from app.materials.material_repository import SQLAlchemyMaterialRepository
 from app.database.session import get_db_session
 from app.materials.calculation_result import MaterialCalculationResult
 from app.geometry.roof_geometry import RoofGeometry
-from app.ai.ai_result import DetectionResult, SegmentationResult
+from app.ai.ai_result import DetectionResult, SegmentationResult, PolygonGeometry
 from app.geometry.point import Point2D # Added import for Point2D
 from app.geometry.polygon import Polygon2D
 from app.services.single_roof_analyzer import SingleRoofAnalyzer
@@ -393,6 +393,52 @@ class MainWindow(QMainWindow):
         )
         self.status_bar.set_status_message(status_msg)
         print(f"Fetch by Address: {total_planes_str} planes for {address} | Area: {area_m2:.1f} m² | Perimeter: {perimeter_m:.1f} m")
+
+        # Display interactive polygons from planes (editable overlay)
+        try:
+            detection_results = []
+            colors_rgb = [
+                (0, 255, 0), (255, 0, 0), (0, 0, 255),
+                (255, 255, 0), (255, 0, 255), (0, 255, 255),
+            ]
+            for i, plane in enumerate(result.get("planes", [])):
+                contour = plane.get("contour", [])
+                if not contour or len(contour) < 3:
+                    continue
+                vertices = []
+                for pt in contour:
+                    if isinstance(pt[0], (list, tuple)):
+                        vertices.append((float(pt[0][0]), float(pt[0][1])))
+                    else:
+                        vertices.append((float(pt[0]), float(pt[1])))
+                score = plane.get("score", 0.5)
+                meta = {
+                    "area_m2": plane.get("area_m2"),
+                    "perimeter_m": plane.get("perimeter_m"),
+                    "edge_details": plane.get("edge_details", []),
+                    "color_name": plane.get("color_name", ""),
+                    "color_rgb": colors_rgb[i % len(colors_rgb)],
+                }
+                dr = DetectionResult(
+                    class_name=plane.get("class_name", "roof"),
+                    geometry=PolygonGeometry(vertices=vertices),
+                    confidence=min(max(score, 0.0), 1.0),
+                    metadata=meta,
+                )
+                detection_results.append(dr)
+
+            if detection_results:
+                self.workspace.roof_canvas.set_ai_overlay_mode(True)
+                self.workspace.roof_canvas.set_ai_overlay_scale(result.get("px_per_m", 1.0))
+                self.workspace.roof_canvas.display_ai_results_overlay(detection_results)
+                if hasattr(self, "ai_overlay_action"):
+                    try:
+                        self.ai_overlay_action.setChecked(True)
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"Interactive polygon overlay failed: {e}")
+
 
     def _on_about(self) -> None:
         self.status_bar.set_status_message("Action: About")

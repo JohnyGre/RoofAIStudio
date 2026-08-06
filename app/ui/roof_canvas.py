@@ -27,38 +27,61 @@ logger = setup_logging() # Initialize logger
 class DraggableVertexItem(QGraphicsEllipseItem):
     """
     Small draggable vertex item used for AI overlay. Stores an index and notifies
-    parent RoofCanvas on position changes via the canvas signal.
+    parent RoofCanvas on position changes via right-click drag.
     """
     def __init__(self, index: int, pos: QPointF, size: float, canvas: 'RoofCanvas'):
-        # Create ellipse centered at (0,0); use setPos to place it at scene coords
         super().__init__(-size/2, -size/2, size, size)
-        self.setFlag(QGraphicsItem.ItemIsMovable, True)
-        self.setFlag(QGraphicsItem.ItemSendsScenePositionChanges, True)
-        self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
+        self.setFlag(QGraphicsItem.ItemIsMovable, False)
+        self.setFlag(QGraphicsItem.ItemSendsScenePositionChanges, False)
+        self.setAcceptedMouseButtons(Qt.MouseButton.RightButton)
+        self.setAcceptHoverEvents(True)
         self._index = index
         self._canvas = canvas
-        # Visual style
+        self._dragging = False
+        self._drag_start = QPointF()
+        self._drag_start_pos = QPointF()
         self.setPen(canvas._point_pen)
         self.setBrush(canvas._point_brush)
-        # Suppress emits during initial placement
         self._suppress_move_emit = True
-        # Place at scene position
         self.setPos(pos)
 
     def enable_move_emits(self) -> None:
-        """Enable emitting move events (call after adding items to scene)."""
         self._suppress_move_emit = False
 
-    def itemChange(self, change, value):
-        from PySide6.QtWidgets import QGraphicsItem
-        if change == QGraphicsItem.ItemPositionHasChanged:
-            try:
-                # Only emit if not suppressed (i.e., user interaction)
-                if not getattr(self, '_suppress_move_emit', False):
-                    self._canvas.ai_overlay_vertex_moved.emit(self._index, self.scenePos())
-            except Exception:
-                pass
-        return super().itemChange(change, value)
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.RightButton:
+            self._dragging = True
+            self._drag_start = event.scenePos()
+            self._drag_start_pos = self.scenePos()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._dragging and (event.buttons() & Qt.MouseButton.RightButton):
+            delta = event.scenePos() - self._drag_start
+            new_pos = self._drag_start_pos + delta
+            self.setPos(new_pos)
+            if not self._suppress_move_emit:
+                self._canvas.ai_overlay_vertex_moved.emit(self._index, new_pos)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.RightButton and self._dragging:
+            self._dragging = False
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+    def hoverEnterEvent(self, event):
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().hoverLeaveEvent(event)
 
 
 class RoofCanvas(QGraphicsView):
@@ -132,6 +155,7 @@ class RoofCanvas(QGraphicsView):
 
         # AI Overlay variables
         self._ai_overlay_active: bool = False
+        self._ai_overlay_px_per_m: float = 1.0  # scale for area recalc
         self._ai_overlay_items: List[Union[QGraphicsPolygonItem, QGraphicsPixmapItem, QGraphicsRectItem]] = []
         # Support multiple detected planes: list of dicts {polygon_item, polygon_points, color}
         self._ai_planes: List[dict] = []
@@ -219,6 +243,10 @@ class RoofCanvas(QGraphicsView):
             self.setDragMode(QGraphicsView.DragMode.NoDrag)
             self.viewport().setCursor(Qt.CursorShape.ArrowCursor)
             self.clear_calibration_visuals()
+
+    def set_ai_overlay_scale(self, px_per_m: float) -> None:
+        """Set the pixel-per-meter scale for area/perimeter recalculation."""
+        self._ai_overlay_px_per_m = px_per_m
 
     def set_ai_overlay_area(self, area_m2: float) -> None:
         """Update AI overlay area display text."""
@@ -392,6 +420,52 @@ class RoofCanvas(QGraphicsView):
             centroid /= max(1, len(self._current_ai_polygon_points))
             self._ai_area_text_item.setPos(centroid + QPointF(6.0 / max(0.1, self._zoom_factor), -12.0 / max(0.1, self._zoom_factor)))
 
+    def _recalc_dimensions(self, pts_px: list) -> None:
+        """Recalculate area and perimeter from polygon points using stored scale."""
+        if len(pts_px) < 3:
+            return
+        # Shoelace formula for area in pixels
+        area_px = 0.0
+        n = len(pts_px)
+        for i in range(n):
+            x1, y1 = pts_px[i]
+            x2, y2 = pts_px[(i + 1) % n]
+            area_px += x1 * y2 - x2 * y1
+        area_px = abs(area_px) / 2.0
+        # Perimeter in pixels
+        peri_px = 0.0
+        for i in range(n):
+            x1, y1 = pts_px[i]
+            x2, y2 = pts_px[(i + 1) % n]
+            peri_px += ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+        # Convert to meters
+        s = self._ai_overlay_px_per_m
+        area_m2 = area_px / (s * s)
+        peri_m = peri_px / s
+        # Edge lengths
+        edge_lens = []
+        for i in range(n):
+            x1, y1 = pts_px[i]
+            x2, y2 = pts_px[(i + 1) % n]
+            edge_lens.append(round(((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5 / s, 1))
+
+        # Update area text
+        if self._ai_area_text_item is None:
+            area_text = QGraphicsSimpleTextItem("")
+            area_text.setBrush(QBrush(QColor(255, 255, 255)))
+            area_text.setZValue(4)
+            self.scene.addItem(area_text)
+            self._ai_area_text_item = area_text
+
+        centroid_x = sum(p[0] for p in pts_px) / n
+        centroid_y = sum(p[1] for p in pts_px) / n
+        text = f"{area_m2:.1f}m2  P={peri_m:.1f}m  hrany: {edge_lens}"
+        self._ai_area_text_item.setText(text)
+        self._ai_area_text_item.setPos(
+            centroid_x + 6 / max(0.1, self._zoom_factor),
+            centroid_y - 24 / max(0.1, self._zoom_factor)
+        )
+
     def _on_ai_overlay_vertex_moved(self, index: int, scene_pos: QPointF) -> None:
         """
         Internal handler when a vertex is moved by user. Update polygon visual immediately.
@@ -405,6 +479,11 @@ class RoofCanvas(QGraphicsView):
             try:
                 new_poly = QPolygonF(self._current_ai_polygon_points)
                 self._ai_polygon_item.setPolygon(new_poly)
+
+                # Recalculate area and perimeter in real-time
+                pts = [(p.x(), p.y()) for p in self._current_ai_polygon_points]
+                self._recalc_dimensions(pts)
+                self._sync_edited_polygon_to_planes()
             except Exception:
                 pass
         # Update label position
@@ -510,9 +589,7 @@ class RoofCanvas(QGraphicsView):
                         'color': color
                     })
 
-                    # Select the first plane by default
-                    if self._selected_ai_plane_index == -1:
-                        self._select_ai_plane(plane_index)
+                    # Do NOT auto-select; user clicks to select
 
                     plane_index += 1
                 else:
@@ -584,6 +661,13 @@ class RoofCanvas(QGraphicsView):
         except Exception:
             pass
 
+    def _sync_edited_polygon_to_planes(self) -> None:
+        """Persist current polygon points back to _ai_planes source data."""
+        if self._selected_ai_plane_index < 0 or not self._ai_planes:
+            return
+        stored = self._ai_planes[self._selected_ai_plane_index]
+        stored["polygon_points"] = list(self._current_ai_polygon_points)
+
     def _select_ai_plane(self, index: int) -> None:
         """Select a detected AI plane for editing. Shows vertices for the selected plane and hides others."""
         if index == self._selected_ai_plane_index:
@@ -617,6 +701,8 @@ class RoofCanvas(QGraphicsView):
         plane = self._ai_planes[index]
         self._ai_polygon_item = plane['polygon_item']
         self._current_ai_polygon_points = list(plane['polygon_points'])
+        pts = [(p.x(), p.y()) for p in self._current_ai_polygon_points]
+        self._recalc_dimensions(pts)
         # Highlight selected polygon
         try:
             highlight_pen = QPen(QColor(255, 255, 0), 3)
@@ -624,7 +710,7 @@ class RoofCanvas(QGraphicsView):
         except Exception:
             pass
         # Create vertex items and labels for selected polygon
-        point_size = 8 / max(0.1, self._zoom_factor)
+        point_size = max(12.0, 16.0 / max(0.1, self._zoom_factor))
         for i, qp in enumerate(self._current_ai_polygon_points):
             v_item = DraggableVertexItem(i, qp, point_size, self)
             v_item.setZValue(2)
@@ -799,11 +885,106 @@ class RoofCanvas(QGraphicsView):
                 self.set_drawing_mode(False)
             return # Consume event in drawing mode
 
+        # Check if click is on an AI polygon (select it)
+        if event.button() == Qt.MouseButton.LeftButton and self._ai_planes and self._ai_overlay_active:
+            pt = QPointF(scene_pos.x(), scene_pos.y())
+            hit_idx = -1
+            for idx in range(len(self._ai_planes) - 1, -1, -1):  # top-first
+                poly = self._ai_planes[idx].get("polygon_points", [])
+                if poly and len(poly) >= 3:
+                    qpf = QPolygonF(poly)
+                    if qpf.containsPoint(pt, Qt.FillRule.OddEvenFill):
+                        hit_idx = idx
+                        break
+            if hit_idx >= 0:
+                self._select_ai_plane(hit_idx)
+                self.ai_overlay_plane_selected.emit(hit_idx, [(float(p.x()), float(p.y())) for p in self._ai_planes[hit_idx]["polygon_points"]])
+                return  # consume event, no panning
+
         # Default panning behavior if no other mode is active
         if event.button() == Qt.MouseButton.LeftButton:
             self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
             self._last_pan_pos = event.position()
         super().mousePressEvent(event)
+
+    def keyPressEvent(self, event):
+        """Delete selected vertex with Delete key."""
+        if event.key() == Qt.Key.Key_Delete and self._ai_vertex_items and self._selected_ai_plane_index >= 0:
+            n = len(self._current_ai_polygon_points)
+            if n <= 3:
+                super().keyPressEvent(event)
+                return
+            # Find vertex closest to mouse cursor
+            cursor_pos = self.mapToScene(self.mapFromGlobal(self.cursor().pos()))
+            min_dist = float('inf')
+            min_idx = -1
+            for i, pt in enumerate(self._current_ai_polygon_points):
+                d = ((pt.x() - cursor_pos.x())**2 + (pt.y() - cursor_pos.y())**2)**0.5
+                if d < min_dist:
+                    min_dist = d
+                    min_idx = i
+            if min_dist < 30 and min_idx >= 0:
+                del self._current_ai_polygon_points[min_idx]
+                new_poly = QPolygonF(self._current_ai_polygon_points)
+                self._ai_polygon_item.setPolygon(new_poly)
+                if min_idx < len(self._ai_vertex_items):
+                    self.scene.removeItem(self._ai_vertex_items[min_idx])
+                    del self._ai_vertex_items[min_idx]
+                if min_idx < len(self._ai_vertex_label_items):
+                    self.scene.removeItem(self._ai_vertex_label_items[min_idx])
+                    del self._ai_vertex_label_items[min_idx]
+                for j, v in enumerate(self._ai_vertex_items):
+                    v._index = j
+                pts = [(p.x(), p.y()) for p in self._current_ai_polygon_points]
+                self._recalc_dimensions(pts)
+                self._sync_edited_polygon_to_planes()
+        super().keyPressEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        """Double-click on polygon edge to add a new vertex at midpoint."""
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mouseDoubleClickEvent(event)
+            return
+        if not self._ai_planes or not self._ai_overlay_active or self._selected_ai_plane_index < 0:
+            super().mouseDoubleClickEvent(event)
+            return
+
+        scene_pos = self.mapToScene(event.position().toPoint())
+        pts = self._current_ai_polygon_points
+        n = len(pts)
+        if n < 2:
+            super().mouseDoubleClickEvent(event)
+            return
+
+        best_dist = float('inf')
+        best_idx = -1
+        best_mid = QPointF()
+        for i in range(n):
+            p1 = pts[i]
+            p2 = pts[(i + 1) % n]
+            dx, dy = p2.x() - p1.x(), p2.y() - p1.y()
+            seg_len_sq = dx*dx + dy*dy
+            if seg_len_sq < 1:
+                continue
+            t = max(0.0, min(1.0, ((scene_pos.x()-p1.x())*dx + (scene_pos.y()-p1.y())*dy) / seg_len_sq))
+            proj = QPointF(p1.x() + t*dx, p1.y() + t*dy)
+            d = ((scene_pos.x()-proj.x())**2 + (scene_pos.y()-proj.y())**2)**0.5
+            if d < best_dist and d < 25:
+                best_dist = d
+                best_idx = i
+                best_mid = proj
+
+        if best_idx >= 0:
+            self._current_ai_polygon_points.insert(best_idx + 1, best_mid)
+            new_poly = QPolygonF(self._current_ai_polygon_points)
+            self._ai_polygon_item.setPolygon(new_poly)
+            self._sync_edited_polygon_to_planes()
+            self._select_ai_plane(self._selected_ai_plane_index)
+            pts_list = [(p.x(), p.y()) for p in self._current_ai_polygon_points]
+            self._recalc_dimensions(pts_list)
+            return
+
+        super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """

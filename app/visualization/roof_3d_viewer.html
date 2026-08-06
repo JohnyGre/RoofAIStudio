@@ -1,0 +1,1185 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RoofAIStudio — 3D Strecha</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; background: #1a1a2e; }
+  #canvas-container { width: 100vw; height: 100vh; position: relative; }
+  canvas { display: block; }
+
+  /* Tooltip */
+  #tooltip {
+    position: absolute; display: none; background: rgba(20,20,40,0.92); color: #fff;
+    padding: 10px 14px; border-radius: 8px; font-size: 13px; line-height: 1.5;
+    pointer-events: none; border: 1px solid rgba(255,255,255,0.15);
+    backdrop-filter: blur(8px); max-width: 260px; z-index: 100;
+  }
+  #tooltip .tt-title { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+  #tooltip .tt-row { display: flex; justify-content: space-between; gap: 12px; }
+  #tooltip .tt-label { color: #aaa; }
+  #tooltip .tt-val { text-align: right; font-weight: 500; }
+
+  /* Legend */
+  #legend {
+    position: absolute; bottom: 20px; left: 20px; background: rgba(20,20,40,0.88);
+    color: #ddd; padding: 12px 16px; border-radius: 10px; font-size: 12px;
+    border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(6px);
+    z-index: 50; user-select: none; line-height: 1.6;
+  }
+  #legend h3 { margin: 0 0 8px 0; font-size: 13px; color: #fff; }
+  #legend .leg-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  #legend .leg-swatch { width: 16px; height: 16px; border-radius: 3px; flex-shrink: 0; }
+
+  /* Info bar */
+  #info-bar {
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    background: rgba(20,20,40,0.85); color: #ccc; padding: 6px 18px;
+    border-radius: 20px; font-size: 12px; border: 1px solid rgba(255,255,255,0.1);
+    backdrop-filter: blur(6px); z-index: 50; pointer-events: none;
+  }
+
+  /* Edit mode indicator */
+  #edit-indicator {
+    position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
+    background: #e74c3c; color: #fff; padding: 5px 16px; border-radius: 14px;
+    font-size: 12px; font-weight: 600; z-index: 50; display: none;
+  }
+  #edit-indicator.active { display: block; }
+
+  /* Help hint */
+  #help-hint {
+    position: absolute; bottom: 20px; right: 20px; color: rgba(255,255,255,0.35);
+    font-size: 11px; z-index: 50; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="canvas-container">
+  <div id="info-bar">🏠 Strecha — načítava sa…</div>
+  <div id="edit-indicator">✏️ Edit mód — ťahaj vrcholy | Delete = zmazať | Dvojklik = ukončiť</div>
+  <div id="legend"></div>
+  <div id="tooltip"></div>
+  <div id="help-hint">🖱️ Ľavý+ťah = rotácia | Koliesko = zoom | Pravý+ťah = posun | Klik = info | Dvojklik = edit</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+// ── Embed data ────────────────────────────────────────────────
+const ROOF_DATA = {
+  "address": "Atriova 16M, 917 01 Trnava",
+  "lat": 48.3953522,
+  "lon": 17.5862943,
+  "px_per_m": 12.1,
+  "image_size": [
+    640,
+    640
+  ],
+  "planes": [
+    {
+      "id": "771c23cb",
+      "class_name": "slope_poly",
+      "color_name": "Zelená",
+      "score": 0.9733664393424988,
+      "area_m2": 136.9331110412436,
+      "perimeter_m": 59.32400147917626,
+      "contour": [
+        [
+          [
+            177,
+            269
+          ]
+        ],
+        [
+          [
+            405,
+            481
+          ]
+        ],
+        [
+          [
+            404,
+            387
+          ]
+        ],
+        [
+          [
+            342,
+            329
+          ]
+        ],
+        [
+          [
+            335,
+            307
+          ]
+        ],
+        [
+          [
+            318,
+            308
+          ]
+        ],
+        [
+          [
+            268,
+            262
+          ]
+        ]
+      ],
+      "edge_details": [
+        {
+          "length_m": 25.69
+        },
+        {
+          "length_m": 7.52
+        },
+        {
+          "length_m": 7.13
+        },
+        {
+          "length_m": 1.73
+        },
+        {
+          "length_m": 1.49
+        },
+        {
+          "length_m": 5.49
+        },
+        {
+          "length_m": 8.06
+        }
+      ]
+    },
+    {
+      "id": "3aa480ff",
+      "class_name": "slope_poly",
+      "color_name": "Modrá",
+      "score": 0.9190979599952698,
+      "area_m2": 89.10072492243386,
+      "perimeter_m": 40.00260572665918,
+      "contour": [
+        [
+          [
+            520,
+            232
+          ]
+        ],
+        [
+          [
+            409,
+            230
+          ]
+        ],
+        [
+          [
+            335,
+            307
+          ]
+        ],
+        [
+          [
+            342,
+            329
+          ]
+        ],
+        [
+          [
+            437,
+            330
+          ]
+        ]
+      ],
+      "edge_details": [
+        {
+          "length_m": 9.42
+        },
+        {
+          "length_m": 8.36
+        },
+        {
+          "length_m": 1.82
+        },
+        {
+          "length_m": 8.04
+        },
+        {
+          "length_m": 10.47
+        },
+        {
+          "length_m": 0.83
+        }
+      ]
+    },
+    {
+      "id": "84303a3b",
+      "class_name": "slope_poly",
+      "color_name": "Červená",
+      "score": 0.9688699841499329,
+      "area_m2": 78.79117644117787,
+      "perimeter_m": 40.05932403252821,
+      "contour": [
+        [
+          [
+            408,
+            126
+          ]
+        ],
+        [
+          [
+            408,
+            126
+          ]
+        ],
+        [
+          [
+            317,
+            214
+          ]
+        ],
+        [
+          [
+            318,
+            308
+          ]
+        ],
+        [
+          [
+            335,
+            307
+          ]
+        ],
+        [
+          [
+            409,
+            230
+          ]
+        ],
+        [
+          [
+            410,
+            167
+          ]
+        ],
+        [
+          [
+            410,
+            167
+          ]
+        ]
+      ],
+      "edge_details": [
+        {
+          "length_m": 1.16
+        },
+        {
+          "length_m": 9.7
+        },
+        {
+          "length_m": 8.02
+        },
+        {
+          "length_m": 1.98
+        },
+        {
+          "length_m": 8.72
+        },
+        {
+          "length_m": 5.07
+        },
+        {
+          "length_m": 0.67
+        },
+        {
+          "length_m": 3.22
+        }
+      ]
+    },
+    {
+      "id": "2bcf1baf",
+      "class_name": "slope_tri",
+      "color_name": "Akvamarínová",
+      "score": 0.8776083588600159,
+      "area_m2": 59.78250034132182,
+      "perimeter_m": 32.67114472511746,
+      "contour": [
+        [
+          [
+            408,
+            126
+          ]
+        ],
+        [
+          [
+            409,
+            230
+          ]
+        ],
+        [
+          [
+            520,
+            232
+          ]
+        ],
+        [
+          [
+            520,
+            232
+          ]
+        ]
+      ],
+      "edge_details": [
+        {
+          "length_m": 8.51
+        },
+        {
+          "length_m": 9.69
+        },
+        {
+          "length_m": 1.56
+        },
+        {
+          "length_m": 11.4
+        },
+        {
+          "length_m": 0.58
+        }
+      ]
+    },
+    {
+      "id": "2f766b40",
+      "class_name": "slope_min",
+      "color_name": "Fialová",
+      "score": 0.9122192859649658,
+      "area_m2": 40.2768466881759,
+      "perimeter_m": 30.0465695752926,
+      "contour": [
+        [
+          [
+            342,
+            329
+          ]
+        ],
+        [
+          [
+            404,
+            387
+          ]
+        ],
+        [
+          [
+            491,
+            389
+          ]
+        ],
+        [
+          [
+            491,
+            389
+          ]
+        ],
+        [
+          [
+            491,
+            389
+          ]
+        ],
+        [
+          [
+            437,
+            330
+          ]
+        ]
+      ],
+      "edge_details": [
+        {
+          "length_m": 6.72
+        },
+        {
+          "length_m": 6.45
+        },
+        {
+          "length_m": 1.23
+        },
+        {
+          "length_m": 1.07
+        },
+        {
+          "length_m": 5.85
+        },
+        {
+          "length_m": 7.93
+        }
+      ]
+    },
+    {
+      "id": "61fbde73",
+      "class_name": "slope_tri",
+      "color_name": "Žltá",
+      "score": 0.8882355093955994,
+      "area_m2": 48.27180564473025,
+      "perimeter_m": 27.50363134209421,
+      "contour": [
+        [
+          [
+            491,
+            389
+          ]
+        ],
+        [
+          [
+            404,
+            387
+          ]
+        ],
+        [
+          [
+            405,
+            481
+          ]
+        ],
+        [
+          [
+            405,
+            481
+          ]
+        ]
+      ],
+      "edge_details": [
+        {
+          "length_m": 7.85
+        },
+        {
+          "length_m": 7.93
+        },
+        {
+          "length_m": 0.58
+        },
+        {
+          "length_m": 9.41
+        },
+        {
+          "length_m": 1.4
+        }
+      ]
+    },
+    {
+      "id": "5634d9d1",
+      "class_name": "slope_min",
+      "color_name": "Zelená",
+      "score": 0.7337296605110168,
+      "area_m2": 33.65124883936606,
+      "perimeter_m": 27.213158728394937,
+      "contour": [
+        [
+          [
+            267,
+            174
+          ]
+        ],
+        [
+          [
+            268,
+            262
+          ]
+        ],
+        [
+          [
+            318,
+            308
+          ]
+        ],
+        [
+          [
+            335,
+            307
+          ]
+        ],
+        [
+          [
+            319,
+            288
+          ]
+        ],
+        [
+          [
+            317,
+            214
+          ]
+        ]
+      ],
+      "edge_details": [
+        {
+          "length_m": 7.27
+        },
+        {
+          "length_m": 5.57
+        },
+        {
+          "length_m": 0.66
+        },
+        {
+          "length_m": 1.57
+        },
+        {
+          "length_m": 5.79
+        },
+        {
+          "length_m": 5.2
+        },
+        {
+          "length_m": 0.41
+        }
+      ]
+    },
+    {
+      "id": "98a20628",
+      "class_name": "slope_tri",
+      "color_name": "Modrá",
+      "score": 0.9230462908744812,
+      "area_m2": 39.106047203137585,
+      "perimeter_m": 26.87427401241243,
+      "contour": [
+        [
+          [
+            267,
+            174
+          ]
+        ],
+        [
+          [
+            177,
+            269
+          ]
+        ],
+        [
+          [
+            177,
+            269
+          ]
+        ],
+        [
+          [
+            268,
+            262
+          ]
+        ]
+      ],
+      "edge_details": [
+        {
+          "length_m": 10.29
+        },
+        {
+          "length_m": 0.83
+        },
+        {
+          "length_m": 7.5
+        },
+        {
+          "length_m": 7.19
+        }
+      ]
+    },
+    {
+      "id": "e85251a5",
+      "class_name": "slope_flat",
+      "color_name": "Červená",
+      "score": 0.3036207854747772,
+      "area_m2": 21.110315414220114,
+      "perimeter_m": 19.93556579425892,
+      "contour": [
+        [
+          [
+            437,
+            330
+          ]
+        ],
+        [
+          [
+            467,
+            295
+          ]
+        ],
+        [
+          [
+            523,
+            351
+          ]
+        ],
+        [
+          [
+            491,
+            389
+          ]
+        ]
+      ],
+      "edge_details": [
+        {
+          "length_m": 3.86
+        },
+        {
+          "length_m": 6.55
+        },
+        {
+          "length_m": 3.86
+        },
+        {
+          "length_m": 6.55
+        }
+      ]
+    }
+  ]
+};
+
+// ── Color helpers ─────────────────────────────────────────────
+const COLOR_MAP = {
+  "Zelená": 0x4CAF50, "Modrá": 0x2196F3, "Červená": 0xF44336,
+  "Akvamarínová": 0x00BCD4, "Fialová": 0x9C27B0, "Žltá": 0xFFEB3B,
+};
+const DEFAULT_COLOR = 0x888888;
+
+function resolveColor(name) {
+  for (const [k, v] of Object.entries(COLOR_MAP)) {
+    if (name.includes(k) || k.includes(name)) return v;
+  }
+  return DEFAULT_COLOR;
+}
+
+function hexToCSS(hex) {
+  return "#" + hex.toString(16).padStart(6, "0");
+}
+
+// ── Scene setup ───────────────────────────────────────────────
+const container = document.getElementById("canvas-container");
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+
+// Sky gradient via background
+scene.background = new THREE.Color(0x1a1a2e);
+scene.fog = new THREE.Fog(0x1a1a2e, 30, 100);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.5, 200);
+camera.position.set(30, 22, 35);
+camera.lookAt(25, 3, 28);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(25, 3, 28);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 5;
+controls.maxDistance = 80;
+controls.maxPolarAngle = Math.PI * 0.55;
+controls.update();
+
+// ── Lighting ──────────────────────────────────────────────────
+const ambient = new THREE.AmbientLight(0x8899cc, 1.6);
+scene.add(ambient);
+
+const sun = new THREE.DirectionalLight(0xfff5e8, 3.5);
+sun.position.set(40, 50, 20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 0.5;
+sun.shadow.camera.far = 150;
+sun.shadow.camera.left = -60;
+sun.shadow.camera.right = 60;
+sun.shadow.camera.top = 60;
+sun.shadow.camera.bottom = -60;
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+
+const fill = new THREE.DirectionalLight(0x8899cc, 0.8);
+fill.position.set(-10, 5, -10);
+scene.add(fill);
+
+// ── Ground plane ──────────────────────────────────────────────
+const groundGeo = new THREE.PlaneGeometry(120, 120);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x2a2a3e, roughness: 0.9 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.position.set(25, -0.05, 28);
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Grid helper
+const grid = new THREE.GridHelper(60, 40, 0x444466, 0x222244);
+grid.position.set(25, 0.001, 28);
+scene.add(grid);
+
+// ── Build roof planes ─────────────────────────────────────────
+const pxPerM = ROOF_DATA.px_per_m || 12.1;
+const planes = ROOF_DATA.planes || [];
+const planeObjects = [];   // { mesh, wire, vertices3D, planeData, group }
+const allVertices3D = [];  // for snapping
+
+// Compute height range
+const nonFlat = planes.filter(p => p.class_name !== "slope_flat");
+const areas = nonFlat.map(p => p.area_m2);
+const minArea = Math.min(...areas);
+const maxArea = Math.max(...areas);
+
+function computeHeight(className, areaM2) {
+  if (className === "slope_flat") return 0.3;
+  if (maxArea === minArea) return 3.5;
+  return 2.0 + ((areaM2 - minArea) / (maxArea - minArea)) * 3.0;
+}
+
+function extractVertices(contour) {
+  const pts = [];
+  for (const item of contour) {
+    const inner = Array.isArray(item[0]) ? item[0] : item;
+    pts.push([inner[0] / pxPerM, inner[1] / pxPerM]);
+  }
+  // Deduplicate consecutive
+  const deduped = [];
+  for (const pt of pts) {
+    if (deduped.length === 0 ||
+        Math.abs(pt[0] - deduped[deduped.length - 1][0]) > 0.001 ||
+        Math.abs(pt[1] - deduped[deduped.length - 1][1]) > 0.001) {
+      deduped.push(pt);
+    }
+  }
+  // Remove last if closed
+  if (deduped.length >= 3 &&
+      Math.abs(deduped[0][0] - deduped[deduped.length - 1][0]) < 0.001 &&
+      Math.abs(deduped[0][1] - deduped[deduped.length - 1][1]) < 0.001) {
+    deduped.pop();
+  }
+  return deduped;
+}
+
+function createExtrudedPolygon(v2d, height, colorHex) {
+  const group = new THREE.Group();
+  const n = v2d.length;
+  if (n < 3) return { group, vertices3D: [] };
+
+  // Shape for top/bottom
+  const shape = new THREE.Shape();
+  shape.moveTo(v2d[0][0], v2d[0][1]);
+  for (let i = 1; i < n; i++) shape.lineTo(v2d[i][0], v2d[i][1]);
+  shape.closePath();
+
+  const extrudeSettings = { steps: 1, depth: height, bevelEnabled: false };
+  const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+
+  // Translate so the base sits at y=0
+  // ExtrudeGeometry extrudes along +Z, so we rotate and translate
+  // vertices are in XY plane, we want them in XZ plane with Y as height
+  geo.rotateX(Math.PI / 2);  // XY → XZ, extrusion goes up (Y)
+
+  const mat = new THREE.MeshStandardMaterial({
+    color: colorHex,
+    roughness: 0.55,
+    metalness: 0.05,
+    transparent: true,
+    opacity: 0.72,
+    side: THREE.DoubleSide,
+    depthWrite: true,
+  });
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.name = "roof-plane";
+  group.add(mesh);
+
+  // Wireframe
+  const wireGeo = new THREE.EdgesGeometry(geo, 30);
+  const wireMat = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.18 });
+  const wire = new THREE.LineSegments(wireGeo, wireMat);
+  wire.visible = true;
+  group.add(wire);
+
+  // Store 3D vertices for editing: top surface (y = height)
+  const vertices3D = v2d.map(([x, z]) => new THREE.Vector3(x, height, z));
+
+  return { group, mesh, wire, vertices3D };
+}
+
+planes.forEach(plane => {
+  const v2d = extractVertices(plane.contour);
+  if (v2d.length < 3) return;
+  const height = computeHeight(plane.class_name, plane.area_m2);
+  const colorHex = resolveColor(plane.color_name || "");
+  const { group, mesh, wire, vertices3D } = createExtrudedPolygon(v2d, height, colorHex);
+
+  group.userData = {
+    id: plane.id,
+    class_name: plane.class_name,
+    color_name: plane.color_name,
+    area_m2: plane.area_m2,
+    perimeter_m: plane.perimeter_m,
+    edge_details: plane.edge_details || [],
+    score: plane.score,
+    height: height,
+    colorHex: colorHex,
+  };
+
+  scene.add(group);
+  planeObjects.push({ group, mesh, wire, vertices3D, planeData: plane });
+  allVertices3D.push(...vertices3D);
+});
+
+// Center scene
+if (planeObjects.length > 0) {
+  const box = new THREE.Box3();
+  planeObjects.forEach(po => box.expandByObject(po.group));
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+  controls.target.copy(center);
+  camera.position.set(center.x + 28, center.y + 22, center.z + 32);
+  camera.lookAt(center);
+  controls.update();
+  document.getElementById("info-bar").textContent =
+    `🏠 ${ROOF_DATA.address || "Strecha"} — ${planes.length} rovín`;
+}
+
+// ── Legend ────────────────────────────────────────────────────
+function buildLegend() {
+  const legend = document.getElementById("legend");
+  const typeLabels = {
+    slope_poly: "Šikmá plocha (polygón)",
+    slope_tri: "Šikmá plocha (trojuholník)",
+    slope_min: "Minimálny sklon",
+    slope_flat: "Plochá strecha",
+  };
+  const seenColors = new Set();
+  let html = "<h3>📐 Legenda</h3>";
+  for (const po of planeObjects) {
+    const d = po.group.userData;
+    const key = d.color_name + "|" + d.class_name;
+    if (seenColors.has(key)) continue;
+    seenColors.add(key);
+    const css = hexToCSS(d.colorHex);
+    html += `<div class="leg-row"><span class="leg-swatch" style="background:${css}"></span>${d.color_name} — ${typeLabels[d.class_name] || d.class_name}</div>`;
+  }
+  legend.innerHTML = html;
+}
+buildLegend();
+
+// ── Interaction state ─────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+raycaster.params.Line = { threshold: 0.3 };
+const mouse = new THREE.Vector2();
+
+let hoveredPlane = null;
+let selectedPlane = null;
+let editMode = false;
+let editPlane = null;
+let draggingVertex = null;
+let vertexSpheres = [];
+const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const intersection = new THREE.Vector3();
+const offset = new THREE.Vector3();
+
+const tooltip = document.getElementById("tooltip");
+const editIndicator = document.getElementById("edit-indicator");
+
+// ── Highlight helpers ─────────────────────────────────────────
+function resetAllHighlight() {
+  planeObjects.forEach(po => {
+    po.mesh.material.emissive?.setHex(0x000000);
+    po.wire.material.color.set(0x000000);
+    po.wire.material.opacity = 0.18;
+  });
+}
+
+function highlightPlane(po, color = 0xffff88) {
+  po.mesh.material.emissive = new THREE.Color(color);
+  po.mesh.material.emissiveIntensity = 0.4;
+  po.wire.material.color.set(color);
+  po.wire.material.opacity = 0.6;
+}
+
+// ── Vertex spheres for edit mode ──────────────────────────────
+function createVertexSpheres(vertices3D) {
+  removeVertexSpheres();
+  const sphereGeo = new THREE.SphereGeometry(0.25, 16, 12);
+  vertices3D.forEach((v, i) => {
+    const mat = new THREE.MeshStandardMaterial({ color: 0xff6600, roughness: 0.3, emissive: 0x331100 });
+    const sphere = new THREE.Mesh(sphereGeo, mat);
+    sphere.position.copy(v);
+    sphere.userData = { vertexIndex: i, isVertexHandle: true };
+    sphere.renderOrder = 999;
+    sphere.material.depthTest = false;
+    sphere.material.depthWrite = false;
+    scene.add(sphere);
+    vertexSpheres.push(sphere);
+  });
+}
+
+function removeVertexSpheres() {
+  vertexSpheres.forEach(s => scene.remove(s));
+  vertexSpheres = [];
+}
+
+function updateVertexSpheres(vertices3D) {
+  vertexSpheres.forEach((s, i) => {
+    if (i < vertices3D.length) s.position.copy(vertices3D[i]);
+  });
+}
+
+// ── Rebuild plane geometry ────────────────────────────────────
+function rebuildPlane(po) {
+  // Remove old group
+  scene.remove(po.group);
+  po.group.traverse(c => {
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) {
+      if (Array.isArray(c.material)) c.material.forEach(m => m.dispose());
+      else c.material.dispose();
+    }
+  });
+
+  // Extract new 2D vertices
+  const v2d = po.vertices3D.map(v => [v.x, v.z]);
+  const height = po.group.userData.height;
+  const colorHex = po.group.userData.colorHex;
+  const { group, mesh, wire, vertices3D } = createExtrudedPolygon(v2d, height, colorHex);
+  group.userData = po.group.userData;
+
+  scene.add(group);
+  po.group = group;
+  po.mesh = mesh;
+  po.wire = wire;
+  po.vertices3D = vertices3D;
+}
+
+// ── Raycasting ────────────────────────────────────────────────
+function getIntersections(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  const meshes = planeObjects.map(po => po.mesh);
+  const intersects = raycaster.intersectObjects(meshes, false);
+  return intersects;
+}
+
+function getVertexIntersection(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  return raycaster.intersectObjects(vertexSpheres, false);
+}
+
+function getPlaneByMesh(mesh) {
+  return planeObjects.find(po => po.mesh === mesh);
+}
+
+// ── Tooltip ───────────────────────────────────────────────────
+function showTooltip(po, event) {
+  const d = po.group.userData;
+  const classLabels = {
+    slope_poly: "Šikmá (polygón)", slope_tri: "Šikmá (trojuholník)",
+    slope_min: "Minimálny sklon", slope_flat: "Plochá",
+  };
+  const edges = (d.edge_details || []).map((e, i) =>
+    `${i + 1}. ${e.length_m?.toFixed(2) || "?"} m`).join("<br>") || "—";
+
+  tooltip.innerHTML = `
+    <div class="tt-title" style="color:${hexToCSS(d.colorHex)}">${d.color_name} — ${classLabels[d.class_name] || d.class_name}</div>
+    <div class="tt-row"><span class="tt-label">Plocha:</span><span class="tt-val">${d.area_m2?.toFixed(2)} m²</span></div>
+    <div class="tt-row"><span class="tt-label">Obvod:</span><span class="tt-val">${d.perimeter_m?.toFixed(2)} m</span></div>
+    <div class="tt-row"><span class="tt-label">Výška:</span><span class="tt-val">${d.height?.toFixed(2)} m</span></div>
+    <div class="tt-row"><span class="tt-label">Skóre:</span><span class="tt-val">${(d.score * 100)?.toFixed(1)}%</span></div>
+    <div style="margin-top:4px;font-size:11px;color:#aaa">Hrany:<br>${edges}</div>
+  `;
+  tooltip.style.display = "block";
+  tooltip.style.left = (event.clientX + 16) + "px";
+  tooltip.style.top = (event.clientY - 10) + "px";
+}
+
+function hideTooltip() {
+  tooltip.style.display = "none";
+}
+
+// ── Event handlers ────────────────────────────────────────────
+let clickTimer = null;
+
+renderer.domElement.addEventListener("pointermove", (event) => {
+  if (draggingVertex) {
+    // Drag vertex in XZ plane
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    if (raycaster.ray.intersectPlane(dragPlane, intersection)) {
+      const sphere = draggingVertex;
+      sphere.position.copy(intersection);
+      // Update the vertex in editPlane
+      const vi = sphere.userData.vertexIndex;
+      editPlane.vertices3D[vi].copy(intersection);
+      updateVertexSpheres(editPlane.vertices3D);
+    }
+    return;
+  }
+
+  // Hover
+  const intersects = getIntersections(event);
+  if (intersects.length > 0) {
+    const po = getPlaneByMesh(intersects[0].object);
+    if (po && po !== hoveredPlane) {
+      if (hoveredPlane && hoveredPlane !== selectedPlane) {
+        resetAllHighlight();
+        if (selectedPlane) highlightPlane(selectedPlane, 0x44aaff);
+      }
+      hoveredPlane = po;
+      if (po !== selectedPlane) highlightPlane(po, 0xaaccff);
+    }
+    if (hoveredPlane && hoveredPlane !== selectedPlane) {
+      showTooltip(hoveredPlane, event);
+    }
+  } else {
+    if (hoveredPlane && hoveredPlane !== selectedPlane) {
+      resetAllHighlight();
+      if (selectedPlane) highlightPlane(selectedPlane, 0x44aaff);
+    }
+    hoveredPlane = null;
+    hideTooltip();
+  }
+});
+
+renderer.domElement.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return; // left click only
+
+  // Check vertex hit first
+  if (editMode && editPlane) {
+    const vertHits = getVertexIntersection(event);
+    if (vertHits.length > 0) {
+      draggingVertex = vertHits[0].object;
+      controls.enabled = false;
+      return;
+    }
+  }
+
+  // Start click/dblclick detection
+  const intersects = getIntersections(event);
+  if (intersects.length > 0) {
+    const po = getPlaneByMesh(intersects[0].object);
+    if (!po) return;
+
+    if (clickTimer) {
+      // Double-click → toggle edit mode
+      clearTimeout(clickTimer);
+      clickTimer = null;
+      handleDoubleClick(po);
+    } else {
+      clickTimer = setTimeout(() => {
+        clickTimer = null;
+        handleSingleClick(po, event);
+      }, 280);
+    }
+  }
+});
+
+renderer.domElement.addEventListener("pointerup", () => {
+  if (draggingVertex) {
+    // Finalize vertex drag — rebuild plane
+    rebuildPlane(editPlane);
+    draggingVertex = null;
+    controls.enabled = true;
+  }
+});
+
+window.addEventListener("keydown", (event) => {
+  if (!editMode || !editPlane) return;
+  if (event.key === "Delete" || event.key === "Backspace") {
+    // Delete last selected/hovered vertex
+    if (draggingVertex) {
+      const vi = draggingVertex.userData.vertexIndex;
+      if (editPlane.vertices3D.length <= 3) {
+        alert("Polygón musí mať aspoň 3 vrcholy.");
+        return;
+      }
+      editPlane.vertices3D.splice(vi, 1);
+      draggingVertex = null;
+      controls.enabled = true;
+      rebuildPlane(editPlane);
+      createVertexSpheres(editPlane.vertices3D);
+    }
+  }
+  if (event.key === "Escape") {
+    exitEditMode();
+  }
+});
+
+function handleSingleClick(po, event) {
+  // Select plane
+  resetAllHighlight();
+  selectedPlane = po;
+  highlightPlane(po, 0x44aaff);
+  showTooltip(po, event);
+}
+
+function handleDoubleClick(po) {
+  if (editMode && editPlane === po) {
+    exitEditMode();
+    return;
+  }
+  if (editMode) exitEditMode();
+  enterEditMode(po);
+}
+
+function enterEditMode(po) {
+  editMode = true;
+  editPlane = po;
+  editIndicator.classList.add("active");
+  resetAllHighlight();
+  highlightPlane(po, 0xff6600);
+  // Deselect in orbit controls to avoid camera rotate on click+drag over vertices
+  createVertexSpheres(po.vertices3D);
+}
+
+function exitEditMode() {
+  editMode = false;
+  editPlane = null;
+  draggingVertex = null;
+  editIndicator.classList.remove("active");
+  removeVertexSpheres();
+  resetAllHighlight();
+  selectedPlane = null;
+  controls.enabled = true;
+}
+
+// ── Resize ────────────────────────────────────────────────────
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ── Render loop ───────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+console.log("RoofAIStudio 3D Viewer ready —", planes.length, "planes loaded.");
+</script>
+</body>
+</html>

@@ -123,8 +123,8 @@ class SingleRoofAnalyzer:
         #     pass
         
         # Calibrated based on user feedback from testing on multiple roofs.
-        default_scale = 11.1
-        logger.info("Using fixed default scale: %.2f px/m", default_scale)
+        default_scale = 12.1
+        logger.info("Using calibrated scale (ref: eaves=10.47m): %.2f px/m", default_scale)
         return default_scale
 
     # ------------------------------------------------------------------
@@ -261,7 +261,7 @@ class SingleRoofAnalyzer:
                 "area_m2": m.true_area_m2,
                 "perimeter_m": m.perimeter_m,
                 "contour": regularized_contour.tolist(), # Use regularized contour
-                "edge_details": [{"length_m": np.linalg.norm(np.array(m.polygon_m[j]) - np.array(m.polygon_m[(j + 1) % len(m.polygon_m)]))} for j in range(len(m.polygon_m))] if m.polygon_m else [],
+                "edge_details": [{"length_m": round(float(np.linalg.norm(np.array(regularized_contour[j]) - np.array(regularized_contour[(j + 1) % len(regularized_contour)]))) / px_per_m, 2)} for j in range(len(regularized_contour))] if len(regularized_contour) > 0 else [],
                 "yolo_box": box_orig,  # pre YOLO BB overlay v _draw_merged
             })
 
@@ -537,24 +537,83 @@ class SingleRoofAnalyzer:
             cv2.fillPoly(overlay, [contour], color)
             cv2.polylines(vis, [contour], True, (255, 255, 255), 1, cv2.LINE_AA)
 
-            # Get centroid for label
-            M = cv2.moments(contour)
-            if M["m00"] > 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
+            # Edge length labels at midpoint of each edge
+            n_verts = len(contour)
+            if n_verts >= 2 and px_per_m is not None:
+                edges = p.get("edge_details", [])
+                for ej in range(min(n_verts, len(edges))):
+                    pt = contour[ej]
+                    p1 = (int(pt[0][0]), int(pt[0][1])) if pt.ndim == 2 else (int(pt[0]), int(pt[1]))
+                    pt2 = contour[(ej + 1) % n_verts]
+                    p2 = (int(pt2[0][0]), int(pt2[0][1])) if pt2.ndim == 2 else (int(pt2[0]), int(pt2[1]))
+                    length_m = edges[ej]["length_m"] if ej < len(edges) else 0
+                    if length_m < 0.01:
+                        continue
+                    mx = (p1[0] + p2[0]) // 2
+                    my = (p1[1] + p2[1]) // 2
+                    dx, dy = p2[0] - p1[0], p2[1] - p1[1]
+                    norm = (dx*dx + dy*dy) ** 0.5
+                    if norm > 0:
+                        mx_o = int(mx - dy / norm * 14)
+                        my_o = int(my + dx / norm * 14)
+                    else:
+                        mx_o, my_o = mx, my - 10
+                    edge_str = f"{length_m:.1f}" if length_m >= 1 else f"{length_m:.2f}"
+                    cv2.putText(vis, edge_str, (mx_o - 12, my_o + 4),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.33, (0,0,0), 3, cv2.LINE_AA)
+                    cv2.putText(vis, edge_str, (mx_o - 12, my_o + 4),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.33, (255,255,200), 1, cv2.LINE_AA)
 
-                # YOLO class + area (e.g. "slope_trop 342m2")
-                class_name = p.get("class_name", "roof")
-                area_str = f'{class_name} {p.get("area_m2", 0):.0f}m2'
-                cv2.putText(vis, area_str, (cx - 20, cy - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,0), 2, cv2.LINE_AA)
-                cv2.putText(vis, area_str, (cx - 20, cy - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,255,255), 1, cv2.LINE_AA)
+        vis = cv2.addWeighted(overlay, alpha, vis, 1 - alpha, 0)
 
-                # Confidence + perimeter (e.g. "conf=0.87  P=117.6m")
-                conf_str = f'conf={p.get("score", 0):.2f}  P={p.get("perimeter_m", 0):.1f}m'
-                cv2.putText(vis, conf_str, (cx - 20, cy + 10), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0,0,0), 2, cv2.LINE_AA)
-                cv2.putText(vis, conf_str, (cx - 20, cy + 10), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255,255,255), 1, cv2.LINE_AA)
+        # --- Legend: polygon summary in bottom-left ---
+        legend_x, legend_y = 8, vis.shape[0] - 8
+        line_h = 14
+        font_scale = 0.32
+        # Sort by area descending
+        sorted_planes = sorted(planes, key=lambda p: p.get("area_m2", 0), reverse=True)
 
-        return cv2.addWeighted(overlay, alpha, vis, 1 - alpha, 0)
+        # Compute total legend height
+        total_lines = 0
+        for p in sorted_planes:
+            total_lines += 2  # header + edges
+        legend_height = total_lines * line_h + 12
+
+        # Semi-transparent background
+        roi = vis[legend_y - legend_height:legend_y, legend_x:legend_x + 220]
+        if roi.size > 0:
+            dark = np.zeros_like(roi)
+            vis[legend_y - legend_height:legend_y, legend_x:legend_x + 220] = cv2.addWeighted(
+                roi, 0.30, dark, 0.70, 0)
+
+        y = legend_y - legend_height + 14
+        for i, p in enumerate(sorted_planes):
+            color = colors[i % len(colors)]
+            class_name = p.get("class_name", "roof")
+            area = p.get("area_m2", 0)
+            peri = p.get("perimeter_m", 0)
+            color_name = p.get("color_name", "")
+
+            # Color square + header
+            cv2.rectangle(vis, (legend_x + 2, y - 8), (legend_x + 14, y + 4), color, -1)
+            header = f"{class_name}  {area:.1f}m2  P={peri:.1f}m"
+            cv2.putText(vis, header, (legend_x + 18, y),
+                       cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255,255,255), 1, cv2.LINE_AA)
+            y += line_h
+
+            # Edge lengths
+            edges = p.get("edge_details", [])
+            if edges:
+                edge_strs = []
+                for e in edges:
+                    L = e["length_m"]
+                    edge_strs.append(f"{L:.1f}" if L >= 1 else f"{L:.2f}")
+                edge_line = "hrany: " + ", ".join(edge_strs) + " m"
+                cv2.putText(vis, edge_line, (legend_x + 18, y),
+                           cv2.FONT_HERSHEY_SIMPLEX, font_scale, (200,200,200), 1, cv2.LINE_AA)
+            y += line_h
+
+        return vis
 
     def unload(self):
         """Free models from memory."""
