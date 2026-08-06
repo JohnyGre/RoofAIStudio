@@ -387,7 +387,6 @@ scene.add(grid);
 const pxPerM = ROOF_DATA.px_per_m || 12.1;
 const planes = ROOF_DATA.planes || [];
 const planeObjects = [];   // { mesh, wire, vertices3D, planeData, group }
-const planesMeta = [];       // intermediate: { v2d, colorHex, height, planeData }
 const allVertices3D = [];  // for snapping
 
 // Compute height range
@@ -480,233 +479,35 @@ planes.forEach(plane => {
   const colorHex = resolveColor(plane.color_name || "");
   const height = plane.height || computeHeight(plane.class_name, plane.area_m2);
 
-  // Store plane data for connected geometry build
-  planesMeta.push({ v2d, colorHex, height, planeData: plane });
 });
 
 // ============================================================
-// BUILD CONNECTED ROOF GEOMETRY
-// Instead of extruding each plane separately, we:
-// 1. Collect all unique vertices across all planes
-// 2. Determine which vertices are on the outer perimeter
-// 3. Assign heights: perimeter=0, internal=ridge_height
-// 4. Build top surface from all plane faces
-// 5. Build wall quads from perimeter edges down to y=0
-// 6. Build bottom face at y=0
+// BUILD ROOF GEOMETRY - Per-plane extrusion with proper heights
 // ============================================================
 
-// Step 1+2: Collect unique vertices and count edge ownership
-const all2D = [];           // [[x, z], ...]
-const vertKeyMap = new Map(); // "x,z" -> index
-const SNAP_TOL = 0.5; // 50 cm snapping tolerance
-function getVIdx(x, z) {
-  for (let i = 0; i < all2D.length; i++) {
-    const [vx, vz] = all2D[i];
-    if (Math.abs(vx - x) < SNAP_TOL && Math.abs(vz - z) < SNAP_TOL) {
-      return i;
-    }
-  }
-  all2D.push([x, z]);
-  return all2D.length - 1;
-}
+planes.forEach(plane => {
+  const v2d = extractVertices(plane.contour);
+  if (v2d.length < 3) return;
+  const colorHex = resolveColor(plane.color_name || "");
+  const height = plane.height || computeHeight(plane.class_name, plane.area_m2);
+  const { group, mesh, wire, vertices3D } = createExtrudedPolygon(v2d, height, colorHex);
 
-const edgeOwners = new Map(); // "a,b" -> count
-function edgeKey(a, b) { return a < b ? a + "," + b : b + "," + a; }
+  group.userData = {
+    id: plane.id,
+    class_name: plane.class_name,
+    color_name: plane.color_name,
+    area_m2: plane.area_m2,
+    perimeter_m: plane.perimeter_m,
+    edge_details: plane.edge_details || [],
+    score: plane.score,
+    height: height,
+    colorHex: colorHex,
+  };
 
-const planeFaces = []; // [{indices: [vIdx,...], colorHex, height}]
-planesMeta.forEach(pm => {
-  const indices = pm.v2d.map(([x, z]) => getVIdx(x, z));
-  // Deduplicate consecutive same-index (closed loop fix)
-  const deduped = [indices[0]];
-  for (let i = 1; i < indices.length; i++) {
-    if (indices[i] !== deduped[deduped.length - 1]) deduped.push(indices[i]);
-  }
-  if (deduped.length >= 3 && deduped[0] === deduped[deduped.length - 1]) deduped.pop();
-  if (deduped.length < 3) return;
-
-  for (let i = 0; i < deduped.length; i++) {
-    const j = (i + 1) % deduped.length;
-    const ek = edgeKey(deduped[i], deduped[j]);
-    edgeOwners.set(ek, (edgeOwners.get(ek) || 0) + 1);
-  }
-  planeFaces.push({ indices: deduped, colorHex: pm.colorHex, height: pm.height, planeData: pm.planeData });
+  scene.add(group);
+  planeObjects.push({ group, mesh, wire, vertices3D, planeData: plane });
+  allVertices3D.push(...vertices3D);
 });
-
-// Step 3: Assign 3D heights
-const isPerimeter = new Array(all2D.length).fill(false);
-for (const [ek, count] of edgeOwners) {
-  if (count === 1) {
-    const [a, b] = ek.split(",").map(Number);
-    isPerimeter[a] = true;
-    isPerimeter[b] = true;
-  }
-}
-
-const RIDGE_H = ROOF_DATA.ridge_height_m || 2.4;
-const all3D = all2D.map(([x, z], i) => {
-  const y = isPerimeter[i] ? 0.05 : RIDGE_H;
-  return new THREE.Vector3(x, y, z);
-});
-
-// Step 4: Build top surface (all roof plane faces, triangulated)
-const topGroup = new THREE.Group();
-planeFaces.forEach(pf => {
-  const { indices, colorHex } = pf;
-  if (indices.length < 3) return;
-
-  // Create BufferGeometry for this plane's top face
-  const verts = indices.map(i => all3D[i]);
-  const geo = new THREE.BufferGeometry();
-  const positions = [];
-  const normals_arr = [];
-
-  // Fan triangulation
-  for (let i = 1; i < verts.length - 1; i++) {
-    positions.push(
-      verts[0].x, verts[0].y, verts[0].z,
-      verts[i].x, verts[i].y, verts[i].z,
-      verts[i+1].x, verts[i+1].y, verts[i+1].z,
-    );
-    // Upward normals
-    for (let k = 0; k < 3; k++) normals_arr.push(0, 1, 0);
-  }
-
-  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals_arr, 3));
-  geo.computeVertexNormals();
-
-  const mat = new THREE.MeshStandardMaterial({
-    color: colorHex,
-    roughness: 0.5,
-    metalness: 0.05,
-    side: THREE.DoubleSide,
-    depthWrite: true,
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  mesh.name = "roof-top";
-  topGroup.add(mesh);
-
-  // Store for interaction
-  planeObjects.push({
-    group: topGroup, mesh, wire: null, vertices3D: verts,
-    planeData: pf.planeData,
-  });
-  allVertices3D.push(...verts);
-});
-
-scene.add(topGroup);
-
-// Step 5: Build walls from perimeter edges
-// Collect perimeter edges as ordered loops
-const perimeterEdges = [];
-for (const [ek, count] of edgeOwners) {
-  if (count === 1) {
-    const [a, b] = ek.split(",").map(Number);
-    perimeterEdges.push([a, b]);
-  }
-}
-
-// Chain perimeter edges into closed loop(s)
-const usedVerts = new Set();
-const loops = [];
-while (perimeterEdges.length > 0) {
-  // Find a starting edge
-  const startEdge = perimeterEdges.shift();
-  const loop = [startEdge[0], startEdge[1]];
-  usedVerts.add(startEdge[0]);
-  usedVerts.add(startEdge[1]);
-  let current = startEdge[1];
-
-  let extended = true;
-  while (extended) {
-    extended = false;
-    for (let i = perimeterEdges.length - 1; i >= 0; i--) {
-      const [a, b] = perimeterEdges[i];
-      if (a === current && !usedVerts.has(b)) {
-        loop.push(b);
-        usedVerts.add(b);
-        current = b;
-        perimeterEdges.splice(i, 1);
-        extended = true;
-        break;
-      } else if (b === current && !usedVerts.has(a)) {
-        loop.push(a);
-        usedVerts.add(a);
-        current = a;
-        perimeterEdges.splice(i, 1);
-        extended = true;
-        break;
-      }
-    }
-  }
-  if (loop.length >= 3) loops.push(loop);
-}
-
-// Build wall quads for each perimeter loop
-loops.forEach(loop => {
-  const wallGeo = new THREE.BufferGeometry();
-  const wPositions = [];
-  const wNormals = [];
-
-  for (let i = 0; i < loop.length; i++) {
-    const j = (i + 1) % loop.length;
-    const a = all3D[loop[i]];
-    const b = all3D[loop[j]];
-
-    // Wall quad: a(top), b(top), b(bottom), a(top), b(bottom), a(bottom)
-    const aBot = new THREE.Vector3(a.x, 0, a.z);
-    const bBot = new THREE.Vector3(b.x, 0, b.z);
-
-    wPositions.push(a.x, a.y, a.z, b.x, b.y, b.z, bBot.x, 0, bBot.z);
-    wPositions.push(a.x, a.y, a.z, bBot.x, 0, bBot.z, aBot.x, 0, aBot.z);
-
-    // Wall normal (pointing outward)
-    const dx = b.z - a.z;
-    const dz = -(b.x - a.x);
-    const len = Math.sqrt(dx*dx + dz*dz) || 1;
-    const nx = dx / len, nz = dz / len;
-    for (let k = 0; k < 6; k++) wNormals.push(nx, 0, nz);
-  }
-
-  wallGeo.setAttribute("position", new THREE.Float32BufferAttribute(wPositions, 3));
-  wallGeo.setAttribute("normal", new THREE.Float32BufferAttribute(wNormals, 3));
-  wallGeo.computeVertexNormals();
-
-  const wallMat = new THREE.MeshStandardMaterial({
-    color: 0xd4c5a9,
-    roughness: 0.7,
-    metalness: 0.0,
-    side: THREE.DoubleSide,
-  });
-  const walls = new THREE.Mesh(wallGeo, wallMat);
-  walls.castShadow = true;
-  walls.receiveShadow = true;
-  walls.name = "roof-walls";
-  scene.add(walls);
-});
-
-// Step 6: Bottom face at y=0 using largest perimeter loop
-if (loops.length > 0) {
-  const largestLoop = loops.reduce((a, b) => a.length >= b.length ? a : b);
-  const shape = new THREE.Shape();
-  const first = all3D[largestLoop[0]];
-  shape.moveTo(first.x, first.z);
-  for (let i = 1; i < largestLoop.length; i++) {
-    const p = all3D[largestLoop[i]];
-    shape.lineTo(p.x, p.z);
-  }
-  shape.closePath();
-  const bottomGeo = new THREE.ShapeGeometry(shape);
-  bottomGeo.rotateX(-Math.PI / 2);
-  bottomGeo.translate(0, 0.01, 0);
-  const bottomMat = new THREE.MeshStandardMaterial({ color: 0x3a3a4a, roughness: 0.9, side: THREE.DoubleSide });
-  const bottom = new THREE.Mesh(bottomGeo, bottomMat);
-  bottom.receiveShadow = true;
-  bottom.name = "roof-bottom";
-  scene.add(bottom);
-}
 
 // // Center scene
 if (planeObjects.length > 0) {
