@@ -498,13 +498,16 @@ planes.forEach(plane => {
 // Step 1+2: Collect unique vertices and count edge ownership
 const all2D = [];           // [[x, z], ...]
 const vertKeyMap = new Map(); // "x,z" -> index
+const SNAP_TOL = 0.5; // 50 cm snapping tolerance
 function getVIdx(x, z) {
-  const k = x.toFixed(1) + "," + z.toFixed(1);
-  if (!vertKeyMap.has(k)) {
-    vertKeyMap.set(k, all2D.length);
-    all2D.push([x, z]);
+  for (let i = 0; i < all2D.length; i++) {
+    const [vx, vz] = all2D[i];
+    if (Math.abs(vx - x) < SNAP_TOL && Math.abs(vz - z) < SNAP_TOL) {
+      return i;
+    }
   }
-  return vertKeyMap.get(k);
+  all2D.push([x, z]);
+  return all2D.length - 1;
 }
 
 const edgeOwners = new Map(); // "a,b" -> count
