@@ -478,13 +478,51 @@ class MainWindow(QMainWindow):
                 edge_details.append({"index": j, "length_m": round(d_px/px_per_m, 2),
                                      "p1_px": [x1, y1], "p2_px": [x2, y2]})
             peri_m = peri_px / px_per_m
-            # Height: 2.4m if plane has hreben edge, else 0 (eaves only)
+            # Height: compute per-vertex from canvas edge classification
+            # Collect classified edges from canvas for this plane
             height = 0.0
-            if i < len(raw_planes):
-                for ed in raw_planes[i].get("edge_details", []):
-                    if ed.get("label") == "hreben":
+            try:
+                canvas = self.workspace.roof_canvas
+                # Recompute edge classification to get per-plane ridge edges
+                from collections import defaultdict
+                all_ai_planes = canvas._ai_planes
+                edge_map = defaultdict(list)
+                centroids = {}
+                for pi, ap in enumerate(all_ai_planes):
+                    apts = ap.get("polygon_points", [])
+                    if len(apts) < 3:
+                        continue
+                    cx = sum(p.x() for p in apts) / len(apts)
+                    cy = sum(p.y() for p in apts) / len(apts)
+                    centroids[pi] = (cx, cy)
+                    for vi in range(len(apts)):
+                        vj = (vi + 1) % len(apts)
+                        p1, p2 = apts[vi], apts[vj]
+                        x1, y1 = p1.x(), p1.y()
+                        x2, y2 = p2.x(), p2.y()
+                        if x1 < x2 or (x1 == x2 and y1 < y2):
+                            key = (x1, y1, x2, y2)
+                        else:
+                            key = (x2, y2, x1, y1)
+                        edge_map[key].append((pi, p1, p2))
+                # Check edges of this plane - any with 2 owners AND not perimeter = ridge
+                apts = all_ai_planes[i].get("polygon_points", [])
+                for vi in range(len(apts)):
+                    vj = (vi + 1) % len(apts)
+                    p1, p2 = apts[vi], apts[vj]
+                    x1, y1 = p1.x(), p1.y()
+                    x2, y2 = p2.x(), p2.y()
+                    if x1 < x2 or (x1 == x2 and y1 < y2):
+                        key = (x1, y1, x2, y2)
+                    else:
+                        key = (x2, y2, x1, y1)
+                    owners = edge_map.get(key, [])
+                    if len(owners) >= 2:
+                        # Shared edge = internal = likely ridge or hip/valley
                         height = 2.4
                         break
+            except Exception:
+                pass
             planes_json.append({
                 "id": "plane_%d" % i,
                 "class_name": "slope_poly",

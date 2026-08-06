@@ -499,7 +499,7 @@ planes.forEach(plane => {
 const all2D = [];           // [[x, z], ...]
 const vertKeyMap = new Map(); // "x,z" -> index
 function getVIdx(x, z) {
-  const k = x.toFixed(2) + "," + z.toFixed(2);
+  const k = x.toFixed(1) + "," + z.toFixed(1);
   if (!vertKeyMap.has(k)) {
     vertKeyMap.set(k, all2D.length);
     all2D.push([x, z]);
@@ -731,7 +731,7 @@ function buildLegend() {
   const seenColors = new Set();
   let html = "<h3>📐 Legenda</h3>";
   for (const po of planeObjects) {
-    const d = po.group.userData;
+    const d = po.planeData || po.group.userData || {};
     const key = d.color_name + "|" + d.class_name;
     if (seenColors.has(key)) continue;
     seenColors.add(key);
@@ -764,16 +764,14 @@ const editIndicator = document.getElementById("edit-indicator");
 function resetAllHighlight() {
   planeObjects.forEach(po => {
     po.mesh.material.emissive?.setHex(0x000000);
-    po.wire.material.color.set(0x000000);
-    po.wire.material.opacity = 0.18;
+    if (po.wire) { po.wire.material.color.set(0x000000); po.wire.material.opacity = 0.18; }
   });
 }
 
 function highlightPlane(po, color = 0xffff88) {
   po.mesh.material.emissive = new THREE.Color(color);
   po.mesh.material.emissiveIntensity = 0.4;
-  po.wire.material.color.set(color);
-  po.wire.material.opacity = 0.6;
+  if (po.wire) { po.wire.material.color.set(color); po.wire.material.opacity = 0.6; }
 }
 
 // ── Vertex spheres for edit mode ──────────────────────────────
