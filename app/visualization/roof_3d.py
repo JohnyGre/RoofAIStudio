@@ -476,7 +476,7 @@ function createExtrudedPolygon(v2d, height, colorHex) {
 planes.forEach(plane => {
   const v2d = extractVertices(plane.contour);
   if (v2d.length < 3) return;
-  const height = computeHeight(plane.class_name, plane.area_m2);
+  const height = plane.height || computeHeight(plane.class_name, plane.area_m2);
   const colorHex = resolveColor(plane.color_name || "");
   const { group, mesh, wire, vertices3D } = createExtrudedPolygon(v2d, height, colorHex);
 

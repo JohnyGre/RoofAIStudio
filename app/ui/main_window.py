@@ -27,6 +27,7 @@ from app.ai.ai_result import DetectionResult, SegmentationResult, PolygonGeometr
 from app.geometry.point import Point2D # Added import for Point2D
 from app.geometry.polygon import Polygon2D
 from app.services.single_roof_analyzer import SingleRoofAnalyzer
+import webbrowser, json, os
 
 class MainWindow(QMainWindow):
     """
@@ -128,7 +129,7 @@ class MainWindow(QMainWindow):
         self.menu_bar.new_project_triggered.connect(self._on_new_project)
         self.menu_bar.open_project_triggered.connect(self._on_open_project)
         self.menu_bar.save_project_triggered.connect(self._on_save_project)
-        self.menu_bar.export_pdf_triggered.connect(self._on_export_pdf)
+        self.menu_bar.export_pdf_triggered.connect(self._on_export_3d)
         self.menu_bar.exit_triggered.connect(self.close)
 
         # Project Menu
@@ -153,7 +154,7 @@ class MainWindow(QMainWindow):
         self.tool_bar.analyze_triggered.connect(self._on_analyze_roof_action)
         self.tool_bar.measure_triggered.connect(self._on_measure)
         self.tool_bar.calibrate_triggered.connect(self._on_calibrate_image_action) # Connect new toolbar action
-        self.tool_bar.export_triggered.connect(self._on_export_pdf)
+        self.tool_bar.export_triggered.connect(self._on_export_3d)
         self.tool_bar.fetch_triggered.connect(self._on_fetch_address)
         self.menu_bar.fetch_address_triggered.connect(self._on_fetch_address)
 
@@ -439,6 +440,78 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Interactive polygon overlay failed: {e}")
 
+        # Store for later 3D export
+        self._last_fetch_result = result
+        self._last_address = address.strip()
+
+    def _on_export_3d(self) -> None:
+        """Export roof data to JSON and open 3D HTML viewer."""
+        from app.visualization.roof_3d import Roof3DExporter
+        from pathlib import Path
+        if not hasattr(self, '_last_fetch_result') or not self._last_fetch_result:
+            QMessageBox.warning(self, "No Data", "Najprv nacitajte strechu cez Fetch.")
+            return
+        result = self._last_fetch_result
+        address = getattr(self, '_last_address', 'Strecha')
+        px_per_m = self.workspace.roof_canvas._ai_overlay_px_per_m or result.get("px_per_m", 12.1)
+        planes_json = []
+        raw_planes = result.get("planes", [])
+        for i, plane in enumerate(self.workspace.roof_canvas._ai_planes):
+            pts = plane.get("polygon_points", [])
+            if len(pts) < 3:
+                continue
+            contour = [[[p.x(), p.y()]] for p in pts]
+            n = len(pts)
+            area_px = 0.0
+            for j in range(n):
+                x1, y1 = pts[j].x(), pts[j].y()
+                x2, y2 = pts[(j+1)%n].x(), pts[(j+1)%n].y()
+                area_px += x1*y2 - x2*y1
+            area_m2 = abs(area_px) / (2 * px_per_m * px_per_m)
+            peri_px = 0.0
+            edge_details = []
+            for j in range(n):
+                x1, y1 = pts[j].x(), pts[j].y()
+                x2, y2 = pts[(j+1)%n].x(), pts[(j+1)%n].y()
+                d_px = ((x2-x1)**2 + (y2-y1)**2)**0.5
+                peri_px += d_px
+                edge_details.append({"index": j, "length_m": round(d_px/px_per_m, 2),
+                                     "p1_px": [x1, y1], "p2_px": [x2, y2]})
+            peri_m = peri_px / px_per_m
+            # Height: 2.4m if plane has hreben edge, else 0 (eaves only)
+            height = 0.0
+            if i < len(raw_planes):
+                for ed in raw_planes[i].get("edge_details", []):
+                    if ed.get("label") == "hreben":
+                        height = 2.4
+                        break
+            planes_json.append({
+                "id": "plane_%d" % i,
+                "class_name": "slope_poly",
+                "color_name": raw_planes[i].get("color_name", "Rovina %d" % (i+1)) if i < len(raw_planes) else "Rovina %d" % (i+1),
+                "area_m2": round(area_m2, 1),
+                "perimeter_m": round(peri_m, 1),
+                "contour": contour,
+                "edge_details": edge_details,
+                "score": raw_planes[i].get("score", 0.9) if i < len(raw_planes) else 0.9,
+                "height": round(height, 2),
+            })
+        if not planes_json:
+            QMessageBox.warning(self, "No Data", "Ziadne polygony na export.")
+            return
+        export_data = {"px_per_m": px_per_m, "address": address, "planes": planes_json, "ridge_height_m": 2.4}
+        out_dir = Path.home() / ".roof_ai_studio" / "exports"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        json_path = out_dir / "roof_export.json"
+        html_path = out_dir / "roof_3d_viewer.html"
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(export_data, f, ensure_ascii=False, indent=2)
+        try:
+            Roof3DExporter.export_to_html(str(json_path), str(html_path))
+            webbrowser.open(str(html_path))
+            self.status_bar.set_status_message("3D export: " + str(html_path))
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", "Failed to generate 3D: " + str(e))
 
     def _on_about(self) -> None:
         self.status_bar.set_status_message("Action: About")
