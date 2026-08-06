@@ -6,6 +6,7 @@ and enabling interactive geometry editing.
 from typing import Optional, List, Union
 import numpy as np
 import cv2 # For converting mask to QImage
+import math
 
 from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QWidget, QSizePolicy,
@@ -23,6 +24,153 @@ from app.ai.segmentation_result import SegmentationResult
 from app.ai.ai_result import DetectionResult, BoundingBox, PolygonGeometry
 
 logger = setup_logging() # Initialize logger
+
+# ---- Pomocne funkcie pre klasifikaciu narozie/uzlabie (Claude fix) ----
+
+def _polygon_signed_area(pts):
+    """Shoelace: positive = CCW, negative = CW."""
+    s = 0.0
+    n = len(pts)
+    for i in range(n):
+        x1, y1 = pts[i]
+        x2, y2 = pts[(i + 1) % n]
+        s += x1 * y2 - x2 * y1
+    return s / 2.0
+
+def _corner_turn(perimeter, idx):
+    """Cross product zákruty pri vrchole perimeter[idx]."""
+    n = len(perimeter)
+    prev_p = perimeter[(idx - 1) % n]
+    cur_p = perimeter[idx]
+    next_p = perimeter[(idx + 1) % n]
+    v1 = (cur_p[0] - prev_p[0], cur_p[1] - prev_p[1])
+    v2 = (next_p[0] - cur_p[0], next_p[1] - cur_p[1])
+    return v1[0] * v2[1] - v1[1] * v2[0]
+
+def _find_nearest_perimeter_index(point, perimeter, tolerance=3.0):
+    """Nájde index vrcholu v perimeter najbližšie k point (v rámci tolerancie px)."""
+    best_idx, best_dist = None, tolerance
+    for i, p in enumerate(perimeter):
+        d = math.hypot(point[0] - p[0], point[1] - p[1])
+        if d < best_dist:
+            best_dist, best_idx = d, i
+    return best_idx
+
+def _classify_hip_or_valley(p1, p2, perimeter, tolerance=3.0):
+    """Robustná klasifikacia narozie/uzlabie podla vonkajsieho obrysu."""
+    if len(perimeter) < 3:
+        return "narozie"
+    area = _polygon_signed_area(perimeter)
+    if abs(area) < 1e-6:
+        return "narozie"
+    ccw_sign = 1.0 if area > 0 else -1.0
+    for pt in (p1, p2):
+        idx = _find_nearest_perimeter_index(pt, perimeter, tolerance)
+        if idx is not None:
+            turn = _corner_turn(perimeter, idx)
+            is_convex = (turn * ccw_sign) > 0
+            return "narozie" if is_convex else "uzlabie"
+    for pt in (p1, p2):
+        idx = _find_nearest_perimeter_index(pt, perimeter, tolerance * 3)
+        if idx is not None:
+            turn = _corner_turn(perimeter, idx)
+            is_convex = (turn * ccw_sign) > 0
+            return "narozie" if is_convex else "uzlabie"
+    return "narozie"
+
+def _build_true_outer_perimeter(edge_planes):
+    '''Posklada skutocny (aj reflexny) obrys celej strechy z hran s 1 vlastnikom.'''
+    boundary_edges = []
+    for key, owners in edge_planes.items():
+        if len(owners) == 1:
+            _, p1, p2 = owners[0]
+            boundary_edges.append((p1, p2))
+    if len(boundary_edges) < 3:
+        return []
+    def key_of(pt):
+        return (round(pt.x(), 2), round(pt.y(), 2))
+    adjacency = {}
+    for p1, p2 in boundary_edges:
+        k1, k2 = key_of(p1), key_of(p2)
+        adjacency.setdefault(k1, []).append((k2, p2))
+        adjacency.setdefault(k2, []).append((k1, p1))
+    bad_vertices = [k for k, v in adjacency.items() if len(v) != 2]
+    if bad_vertices:
+        import logging
+        logging.getLogger("Roof AI Studio").warning(
+            "_build_true_outer_perimeter: %d vrcholov nema presne 2 hranicne hrany - %s",
+            len(bad_vertices), bad_vertices[:5])
+    if not adjacency:
+        return []
+    start_key = next(iter(adjacency))
+    start_pt = None
+    for p1, p2 in boundary_edges:
+        if key_of(p1) == start_key:
+            start_pt = p1
+            break
+    if start_pt is None:
+        return []
+    ring = [start_pt]
+    visited = {start_key}
+    prev_key, cur_key = None, start_key
+    for _ in range(len(adjacency) + 2):
+        neighbors = adjacency.get(cur_key, [])
+        nxt = None
+        for nk, npt in neighbors:
+            if nk != prev_key:
+                nxt = (nk, npt)
+                break
+        if nxt is None:
+            break
+        nk, npt = nxt
+        if nk == start_key:
+            break
+        if nk in visited:
+            break
+        ring.append(npt)
+        visited.add(nk)
+        prev_key, cur_key = cur_key, nk
+    return ring
+
+def _classify_hip_or_valley_fallback(p1, p2, owners_data, planes_data):
+    """Fallback: segmentový test bez perimeter dát."""
+    TOL = 3.0
+    def find_far_vertex(plane_idx, ax, ay, bx, by):
+        pts = planes_data[plane_idx]["polygon_points"]
+        mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
+        best_pt, best_d = None, -1.0
+        for pt in pts:
+            px, py = pt.x(), pt.y()
+            near_a = math.hypot(px - ax, py - ay) < TOL
+            near_b = math.hypot(px - bx, py - by) < TOL
+            if near_a or near_b:
+                continue
+            d = math.hypot(px - mx, py - my)
+            if d > best_d:
+                best_d, best_pt = d, (px, py)
+        return best_pt
+
+    def ccw(o, a, b):
+        return (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0])
+
+    def segments_intersect(p, q, r, s):
+        d1 = ccw(r, s, p); d2 = ccw(r, s, q)
+        d3 = ccw(p, q, r); d4 = ccw(p, q, s)
+        return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
+
+    ax, ay, bx, by = p1.x(), p1.y(), p2.x(), p2.y()
+    idx_a = owners_data[0][0]; idx_b = owners_data[1][0]
+    far_a = find_far_vertex(idx_a, ax, ay, bx, by)
+    far_b = find_far_vertex(idx_b, ax, ay, bx, by)
+    if far_a is None or far_b is None:
+        return "narozie"
+    if segments_intersect(far_a, far_b, (ax, ay), (bx, by)):
+        return "uzlabie"
+    return "narozie"
+
+# ---- Koniec pomocnych funkcii ----
+
+
 
 class DraggableVertexItem(QGraphicsEllipseItem):
     """
@@ -156,6 +304,10 @@ class RoofCanvas(QGraphicsView):
         # AI Overlay variables
         self._ai_overlay_active: bool = False
         self._ai_overlay_px_per_m: float = 1.0  # scale for area recalc
+        self._outer_perimeter_items: list = []
+        self._show_outer_perimeter: bool = True
+        self._building_centroid = None
+        self._outer_perimeter_points: list = []
         self._ai_overlay_items: List[Union[QGraphicsPolygonItem, QGraphicsPixmapItem, QGraphicsRectItem]] = []
         # Support multiple detected planes: list of dicts {polygon_item, polygon_points, color}
         self._ai_planes: List[dict] = []
@@ -475,17 +627,61 @@ class RoofCanvas(QGraphicsView):
             return
         # Update point immediately for visual feedback
         self._current_ai_polygon_points[index] = scene_pos
-        if self._ai_polygon_item:
-            try:
-                new_poly = QPolygonF(self._current_ai_polygon_points)
-                self._ai_polygon_item.setPolygon(new_poly)
-
-                # Recalculate area and perimeter in real-time
+        # --- SNAP LOGIC ---
+        snap = self._find_snap_target(scene_pos, self._selected_ai_plane_index, index)
+        if snap:
+            scene_pos = snap["position"]
+            if snap["same_plane"]:
+                del_idx = snap["vertex_idx"]
+                if del_idx != index and len(self._current_ai_polygon_points) > 3:
+                    self._current_ai_polygon_points[index] = scene_pos
+                    drag_idx = index - 1 if del_idx < index else index
+                    del self._current_ai_polygon_points[del_idx]
+                    self._ai_polygon_item.setPolygon(QPolygonF(self._current_ai_polygon_points))
+                    if del_idx < len(self._ai_vertex_items):
+                        try: self.scene.removeItem(self._ai_vertex_items[del_idx])
+                        except: pass
+                        del self._ai_vertex_items[del_idx]
+                    if del_idx < len(self._ai_vertex_label_items):
+                        try: self.scene.removeItem(self._ai_vertex_label_items[del_idx])
+                        except: pass
+                        del self._ai_vertex_label_items[del_idx]
+                    for vi, vitem in enumerate(self._ai_vertex_items):
+                        vitem._index = vi
+                    if drag_idx < len(self._ai_vertex_items):
+                        self._ai_vertex_items[drag_idx].setPos(scene_pos)
+                        self._ai_vertex_items[drag_idx]._dragging = True
+                    if drag_idx < len(self._ai_vertex_label_items):
+                        self._ai_vertex_label_items[drag_idx].setPos(
+                            scene_pos + QPointF(6.0/max(0.1,self._zoom_factor), -12.0/max(0.1,self._zoom_factor)))
+                    pts = [(p.x(), p.y()) for p in self._current_ai_polygon_points]
+                    self._recalc_dimensions(pts)
+                    self._sync_edited_polygon_to_planes()
+                    self._mark_snapped_vertices(self._selected_ai_plane_index, drag_idx)
+                    return
+                else:
+                    self._current_ai_polygon_points[index] = scene_pos
+                    self._ai_polygon_item.setPolygon(QPolygonF(self._current_ai_polygon_points))
+                    pts = [(p.x(), p.y()) for p in self._current_ai_polygon_points]
+                    self._recalc_dimensions(pts)
+                    self._sync_edited_polygon_to_planes()
+            else:
+                self._current_ai_polygon_points[index] = scene_pos
+                self._ai_polygon_item.setPolygon(QPolygonF(self._current_ai_polygon_points))
                 pts = [(p.x(), p.y()) for p in self._current_ai_polygon_points]
                 self._recalc_dimensions(pts)
                 self._sync_edited_polygon_to_planes()
-            except Exception:
-                pass
+                self._update_plane_polygon(snap["plane_idx"])
+                self._mark_snapped_vertices(snap["plane_idx"], snap["vertex_idx"])
+        else:
+            if self._ai_polygon_item:
+                try:
+                    self._ai_polygon_item.setPolygon(QPolygonF(self._current_ai_polygon_points))
+                    pts = [(p.x(), p.y()) for p in self._current_ai_polygon_points]
+                    self._recalc_dimensions(pts)
+                    self._sync_edited_polygon_to_planes()
+                except Exception:
+                    pass
         # Update label position
         if index < len(self._ai_vertex_label_items):
             label = self._ai_vertex_label_items[index]
@@ -592,11 +788,14 @@ class RoofCanvas(QGraphicsView):
                     # Do NOT auto-select; user clicks to select
 
                     plane_index += 1
+
                 else:
                     rect = QRectF(bbox.x_min, bbox.y_min, bbox.width, bbox.height)
                     rect_item = self.scene.addRect(rect, self._detection_box_pen)
                     self._ai_overlay_items.append(rect_item)
 
+
+        self._update_outer_perimeter()
         for item in self._ai_overlay_items:
             item.setZValue(1)
         # Ensure vertex items and labels have proper Z
@@ -661,12 +860,312 @@ class RoofCanvas(QGraphicsView):
         except Exception:
             pass
 
+    def _find_snap_target(self, pos, exclude_plane_idx, exclude_vertex_idx, threshold_px=11.0):
+        """Find nearest vertex across ALL planes for snapping."""
+        from PySide6.QtCore import QPointF
+        drag_origin = None
+        if 0 <= exclude_plane_idx < len(self._ai_planes):
+            opts = self._ai_planes[exclude_plane_idx].get("polygon_points", [])
+            if exclude_vertex_idx < len(opts):
+                drag_origin = (opts[exclude_vertex_idx].x(), opts[exclude_vertex_idx].y())
+        best_dist = threshold_px
+        best = None
+        for pi, plane in enumerate(self._ai_planes):
+            pts = plane.get("polygon_points", [])
+            for vi, pt in enumerate(pts):
+                if pi == exclude_plane_idx and vi == exclude_vertex_idx:
+                    continue
+                if drag_origin is not None:
+                    if abs(pt.x() - drag_origin[0]) < 0.5 and abs(pt.y() - drag_origin[1]) < 0.5:
+                        continue
+                d = ((pt.x() - pos.x())**2 + (pt.y() - pos.y())**2)**0.5
+                if d < best_dist:
+                    best_dist = d
+                    best = {"plane_idx": pi, "vertex_idx": vi, "position": QPointF(pt.x(), pt.y()),
+                            "same_plane": pi == exclude_plane_idx, "distance": d}
+        return best
+
+    def _update_plane_polygon(self, plane_idx):
+        if not (0 <= plane_idx < len(self._ai_planes)):
+            return
+        from PySide6.QtGui import QPolygonF
+        plane = self._ai_planes[plane_idx]
+        plane["polygon_item"].setPolygon(QPolygonF(plane["polygon_points"]))
+        if plane_idx == self._selected_ai_plane_index:
+            pts = [(p.x(), p.y()) for p in plane["polygon_points"]]
+            self._recalc_dimensions(pts)
+
+    def _mark_snapped_vertices(self, plane_idx, vertex_idx):
+        if not (0 <= plane_idx < len(self._ai_planes)):
+            return
+        pts = self._ai_planes[plane_idx].get("polygon_points", [])
+        if vertex_idx >= len(pts):
+            return
+        from PySide6.QtCore import QTimer
+        from PySide6.QtGui import QPen, QBrush, QColor
+        sp = pts[vertex_idx]
+        ring = QGraphicsEllipseItem(sp.x()-6, sp.y()-6, 12, 12)
+        ring.setPen(QPen(QColor(0,255,0,200), 2))
+        ring.setBrush(QBrush(QColor(0,255,0,60)))
+        ring.setZValue(5)
+        self.scene.addItem(ring)
+        def _rm(): 
+            try: self.scene.removeItem(ring)
+            except: pass
+        QTimer.singleShot(400, _rm)
+
     def _sync_edited_polygon_to_planes(self) -> None:
         """Persist current polygon points back to _ai_planes source data."""
         if self._selected_ai_plane_index < 0 or not self._ai_planes:
             return
         stored = self._ai_planes[self._selected_ai_plane_index]
         stored["polygon_points"] = list(self._current_ai_polygon_points)
+        self._update_outer_perimeter()
+
+    def _compute_convex_hull_edges(self, all_pts):
+        if len(all_pts) < 3:
+            return set()
+        pts_sorted = sorted(all_pts)
+        def cross(o, a, b):
+            return (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0])
+        lower = []
+        for p in pts_sorted:
+            while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+                lower.pop()
+            lower.append(p)
+        upper = []
+        for p in reversed(pts_sorted):
+            while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+                upper.pop()
+            upper.append(p)
+        hull = lower[:-1] + upper[:-1]
+        hull_edges = set()
+        n = len(hull)
+        for i in range(n):
+            p1, p2 = hull[i], hull[(i+1)%n]
+            if p1 < p2:
+                hull_edges.add((p1[0], p1[1], p2[0], p2[1]))
+            else:
+                hull_edges.add((p2[0], p2[1], p1[0], p1[1]))
+        return hull_edges
+
+    def _compute_dominant_okap_direction(self, edge_planes, hull_edges_set):
+        import math
+        angles = []
+        for key, owners in edge_planes.items():
+            if len(owners) != 1 or key not in hull_edges_set:
+                continue
+            x1, y1, x2, y2 = key
+            dx, dy = x2 - x1, y2 - y1
+            length = (dx*dx + dy*dy)**0.5
+            if length < 5:
+                continue
+            angle = math.atan2(dy, dx)
+            if angle < 0:
+                angle += math.pi
+            angles.append((angle, length))
+        if not angles:
+            return None
+        bins = 18
+        hist = [0.0] * bins
+        for angle, weight in angles:
+            hist[int(angle / math.pi * bins) % bins] += weight
+        return (max(range(bins), key=lambda i: hist[i]) + 0.5) * math.pi / bins
+
+    def _classify_edge(self, p1, p2, centroids, hull_edges_set, key, okap_dir=None, owners_data=None, planes_data=None):
+        """Klasifikacia hrany. Vracia (label_sk, (r,g,b), width)."""
+        import math
+        ANGLE_TOL = math.radians(15)
+
+        def edge_angle(a, b):
+            ang = math.atan2(b.y() - a.y(), b.x() - a.x())
+            return ang % math.pi
+
+        def is_parallel_to_okap(ang):
+            if okap_dir is None:
+                return False
+            diff = abs(ang - okap_dir)
+            diff = min(diff, math.pi - diff)
+            return diff <= ANGLE_TOL
+
+        edge_ang = edge_angle(p1, p2)
+        px1, py1 = p1.x(), p1.y()
+        px2, py2 = p2.x(), p2.y()
+        mx, my = (px1 + px2) / 2.0, (py1 + py2) / 2.0
+        ex, ey = px2 - px1, py2 - py1
+        edge_len = (ex*ex + ey*ey)**0.5
+        if edge_len < 0.01:
+            return ("", (128,128,128), 1)
+        nx, ny = -ey, ey  # using ex for ny? No: nx=-dy, ny=dx
+        nx, ny = -ey / edge_len, ex / edge_len
+
+        # ---- 1 polygon: outer edge ----
+        if len(centroids) == 1:
+            cx, cy = centroids[0]
+            if self._building_centroid is not None:
+                bcx, bcy = self._building_centroid
+                build_side = (bcx - mx) * nx + (bcy - my) * ny
+                if build_side > 0:
+                    nx, ny = -nx, -ny
+                plane_side = (cx - mx) * nx + (cy - my) * ny
+                if plane_side < 0:
+                    return ("okap", (0, 240, 255), 4)
+                else:
+                    return ("stit", (100, 255, 130), 2)
+            return ("okap", (0, 240, 255), 4) if edge_len > 30 else ("stit", (100, 255, 130), 2)
+
+        # ---- 2 polygons: shared edge ----
+        if len(centroids) != 2:
+            return ("internal", (255, 200, 50), 1.5)
+
+        # OPRAVA v2: predosly test cez znamienko taziska (same_side = s1*s2>0)
+        # bol nespolahlivy - pri nesymetrickych AI-detegovanych polygonoch sa
+        # lahko "prehodi" na nespravnu stranu aj pre skutocny hreben, co viedlo
+        # raz k falosnemu hrebenu (T-junction hrana), inokedy k uplnemu
+        # zmiznutiu skutocneho hrebena.
+        #
+        # Namiesto toho pouzi vlastnost, ktora je geometricky stabilna:
+        # SKUTOCNY HREBEN lezi striktne VNUTRI strechy - ani jeden jeho
+        # koncovy bod sa nedotyka vonkajsieho obrysu (na rozdiel od narozi/
+        # uzlabia, ktore vzdy maju aspon jeden koniec na okape/rohu podorysu).
+        perimeter = getattr(self, "_outer_perimeter_points", None)
+        perimeter_xy = [(pt.x(), pt.y()) for pt in perimeter] if perimeter else []
+
+        def _on_perimeter(pt_xy):
+            if not perimeter_xy:
+                return False
+            return _find_nearest_perimeter_index(pt_xy, perimeter_xy, tolerance=3.0) is not None
+
+        p1_on_perim = _on_perimeter((px1, py1))
+        p2_on_perim = _on_perimeter((px2, py2))
+
+        if (not p1_on_perim) and (not p2_on_perim) and is_parallel_to_okap(edge_ang):
+            return ("hreben", (60, 60, 60), 3.5)
+
+        if p1_on_perim or p2_on_perim:
+            # aspon jeden koniec sa dotyka obrysu -> narozie/uzlabie
+            if perimeter_xy:
+                result = _classify_hip_or_valley((px1, py1), (px2, py2), perimeter_xy, tolerance=3.0)
+            else:
+                result = _classify_hip_or_valley_fallback(p1, p2, owners_data, planes_data)
+            if result == "narozie":
+                return ("narozie", (255, 80, 60), 2.5)
+            else:
+                return ("uzlabie", (180, 80, 255), 2)
+
+        # Ani jeden koniec nie je na obryse, ale hrana NIE JE rovnobezna
+        # s okapom - vzacny pripad (napr. vnutorny "T-spoj" dvoch hrebenov
+        # roznej vysky). Zarad ako hreben (je to stale vnutorna "vysoka"
+        # hrana), ale zaloguj to pre kontrolu.
+        logger.debug(
+            "_classify_edge: interny T-spoj hrebenov (ani jeden koniec na "
+            "perimetri, uhol nie je rovnobezny s okapom) p1=(%.1f,%.1f) "
+            "p2=(%.1f,%.1f) edge_ang=%.1fdeg okap_dir=%s",
+            px1, py1, px2, py2, math.degrees(edge_ang),
+            f"{math.degrees(okap_dir):.1f}deg" if okap_dir is not None else "None"
+        )
+        return ("hreben", (60, 60, 60), 3.5)
+
+    def _update_outer_perimeter(self) -> None:
+        """Classify edges: okap(cyan), stit(green), hreben(dark/org), uzlabie(purple), narozie(red)."""
+        for item in self._outer_perimeter_items:
+            try: self.scene.removeItem(item)
+            except: pass
+        self._outer_perimeter_items.clear()
+        import logging
+        logger = logging.getLogger("Roof AI Studio")
+        if not self._show_outer_perimeter or not self._ai_planes:
+            logger.debug("_update_outer_perimeter: skipped (show=%s, planes=%d)", self._show_outer_perimeter, len(self._ai_planes))
+            return
+        from collections import defaultdict
+        from PySide6.QtGui import QPen, QColor, QBrush
+        edge_planes = defaultdict(list)
+        plane_centroids = {}
+        for pi, plane in enumerate(self._ai_planes):
+            pts = plane.get("polygon_points", [])
+            n_pts = len(pts)
+            if n_pts < 3:
+                continue
+            cx = sum(p.x() for p in pts) / n_pts
+            cy = sum(p.y() for p in pts) / n_pts
+            plane_centroids[pi] = (cx, cy)
+            for i in range(n_pts):
+                j = (i + 1) % n_pts
+                p1, p2 = pts[i], pts[j]
+                if (p1.x() < p2.x()) or (p1.x() == p2.x() and p1.y() < p2.y()):
+                    key = (p1.x(), p1.y(), p2.x(), p2.y())
+                else:
+                    key = (p2.x(), p2.y(), p1.x(), p1.y())
+                edge_planes[key].append((pi, p1, p2))
+        all_pts = []
+        for plane in self._ai_planes:
+            for pt in plane.get("polygon_points", []):
+                all_pts.append((pt.x(), pt.y()))
+        hull = self._compute_convex_hull_edges(all_pts)
+        hull_edges_set = hull
+        # Also store the ordered perimeter points for narozie/uzlabie classification
+        if all_pts:
+            from collections import OrderedDict
+            pts_sorted = sorted(all_pts)
+            def _cross(o, a, b):
+                return (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0])
+            lower = []
+            for p in pts_sorted:
+                while len(lower) >= 2 and _cross(lower[-2], lower[-1], p) <= 0:
+                    lower.pop()
+                lower.append(p)
+            upper = []
+            for p in reversed(pts_sorted):
+                while len(upper) >= 2 and _cross(upper[-2], upper[-1], p) <= 0:
+                    upper.pop()
+                upper.append(p)
+            hull_pts = lower[:-1] + upper[:-1]
+            # Use TRUE outer ring (possibly reflex) instead of convex hull
+            # Convex hull "zjeda" reflexne rohy -> uzlabie by sa nikdy nedetegovalo
+            true_ring = _build_true_outer_perimeter(edge_planes)
+            if true_ring:
+                from PySide6.QtCore import QPointF as _QPF
+                self._outer_perimeter_points = [_QPF(pt.x(), pt.y()) for pt in true_ring]
+            else:
+                from PySide6.QtCore import QPointF as _QPF
+                self._outer_perimeter_points = [_QPF(x, y) for x, y in hull_pts]
+        else:
+            self._outer_perimeter_points = []
+        if plane_centroids:
+            all_bc = list(plane_centroids.values())
+            self._building_centroid = (sum(c[0] for c in all_bc) / len(all_bc),
+                                       sum(c[1] for c in all_bc) / len(all_bc))
+        okap_dir = self._compute_dominant_okap_direction(edge_planes, hull_edges_set)
+        label_counts = {}
+        for key, owners in edge_planes.items():
+            p1, p2 = owners[0][1], owners[0][2]
+            centroids = [plane_centroids[pi] for pi, _, _ in owners]
+            label_sk, (r,g,b), width = self._classify_edge(p1, p2, centroids, hull_edges_set, key, okap_dir, owners, self._ai_planes)
+            if not label_sk:
+                continue
+            pen = QPen(QColor(r, g, b, 220), width)
+            line = QGraphicsLineItem(p1.x(), p1.y(), p2.x(), p2.y())
+            line.setPen(pen)
+            line.setZValue(3.5)
+            self.scene.addItem(line)
+            self._outer_perimeter_items.append(line)
+            label_counts[label_sk] = (r, g, b)
+        view_tl = self.mapToScene(10, 30)
+        ly = view_tl.y()
+        for lkey, ltext in [("okap", "okap (odkvap)"), ("stit", "stit"), ("internal", "pomocna"),
+                             ("hreben", "hreben"), ("uzlabie", "uzlabie"), ("narozie", "narozie")]:
+            if lkey in label_counts:
+                r, g, b = label_counts[lkey]
+                item = QGraphicsSimpleTextItem(f"-- {ltext}")
+                item.setBrush(QBrush(QColor(r, g, b)))
+                item.setZValue(5); item.setPos(10, ly)
+                self.scene.addItem(item); self._outer_perimeter_items.append(item)
+                ly += 18
+        logger.info("_update_outer_perimeter: classified %d edges, %d types", len(self._outer_perimeter_items) - len(label_counts), len(label_counts))
+
+    def toggle_outer_perimeter(self) -> None:
+        self._show_outer_perimeter = not self._show_outer_perimeter
+        self._update_outer_perimeter()
 
     def _select_ai_plane(self, index: int) -> None:
         """Select a detected AI plane for editing. Shows vertices for the selected plane and hides others."""
