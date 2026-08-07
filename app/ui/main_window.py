@@ -27,7 +27,7 @@ from app.ai.ai_result import DetectionResult, SegmentationResult, PolygonGeometr
 from app.geometry.point import Point2D # Added import for Point2D
 from app.geometry.polygon import Polygon2D
 from app.services.single_roof_analyzer import SingleRoofAnalyzer
-import webbrowser, json, os, math
+import webbrowser, json, os, math, cv2
 
 class MainWindow(QMainWindow):
     """
