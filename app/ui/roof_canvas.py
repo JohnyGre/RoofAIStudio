@@ -1214,6 +1214,135 @@ class RoofCanvas(QGraphicsView):
         self._show_outer_perimeter = not self._show_outer_perimeter
         self._update_outer_perimeter()
 
+
+    def _delete_selected_polygon(self) -> None:
+        """Delete the currently selected AI plane polygon."""
+        idx = self._selected_ai_plane_index
+        if idx < 0 or idx >= len(self._ai_planes):
+            return
+        plane = self._ai_planes[idx]
+        try:
+            if 'polygon_item' in plane and plane['polygon_item']:
+                self.scene.removeItem(plane['polygon_item'])
+        except Exception:
+            pass
+        for v in self._ai_vertex_items:
+            try: self.scene.removeItem(v)
+            except: pass
+        self._ai_vertex_items.clear()
+        for lb in self._ai_vertex_label_items:
+            try: self.scene.removeItem(lb)
+            except: pass
+        self._ai_vertex_label_items.clear()
+        if self._ai_area_text_item:
+            try: self.scene.removeItem(self._ai_area_text_item)
+            except: pass
+            self._ai_area_text_item = None
+        del self._ai_planes[idx]
+        self._selected_ai_plane_index = -1
+        self._ai_polygon_item = None
+        self._current_ai_polygon_points = []
+        self._update_outer_perimeter()
+
+
+    # --- Add-plane mode ---
+    def _toggle_add_plane_mode(self) -> None:
+        """Toggle add-plane drawing mode. Draw a new polygon and add it to AI planes."""
+        self._add_plane_mode = not getattr(self, '_add_plane_mode', False)
+        if self._add_plane_mode:
+            self._add_plane_points = []
+            self._add_plane_items = []
+            self.viewport().setCursor(Qt.CursorShape.CrossCursor)
+            self.status_bar_msg = "Add plane: left-click = add vertex, right-click = finish"
+            print("Add-plane mode ON")
+        else:
+            self._clear_add_plane_visuals()
+            self.viewport().setCursor(Qt.CursorShape.ArrowCursor)
+            print("Add-plane mode OFF")
+
+    def _clear_add_plane_visuals(self) -> None:
+        for item in getattr(self, '_add_plane_items', []):
+            try: self.scene.removeItem(item)
+            except: pass
+        self._add_plane_items = []
+        self._add_plane_points = []
+
+    def _finalize_add_plane(self) -> None:
+        """Finish drawing and add new polygon to AI planes."""
+        pts = self._add_plane_points
+        self._clear_add_plane_visuals()
+        self._add_plane_mode = False
+        self.viewport().setCursor(Qt.CursorShape.ArrowCursor)
+        if len(pts) < 3:
+            return
+        # Create polygon item
+        qpoly = QPolygonF(pts)
+        color = self._ai_plane_colors[len(self._ai_planes) % len(self._ai_plane_colors)]
+        pen = QPen(color, 2)
+        poly_item = QGraphicsPolygonItem(qpoly)
+        poly_item.setPen(pen)
+        poly_item.setBrush(Qt.NoBrush)
+        poly_item.setZValue(1)
+        self.scene.addItem(poly_item)
+        self._ai_overlay_items.append(poly_item)
+        self._ai_planes.append({
+            'polygon_item': poly_item,
+            'polygon_points': pts,
+            'color': color,
+        })
+        self._update_outer_perimeter()
+        # Select the new plane
+        self._select_ai_plane(len(self._ai_planes) - 1)
+
+
+    def _merge_polygons(self, idx_a: int, idx_b: int) -> None:
+        """Merge two adjacent AI planes into one by computing convex hull."""
+        if idx_a == idx_b:
+            return
+        a, b = min(idx_a, idx_b), max(idx_a, idx_b)
+        plane_a = self._ai_planes[a]
+        plane_b = self._ai_planes[b]
+        pts_a = [(p.x(), p.y()) for p in plane_a['polygon_points']]
+        pts_b = [(p.x(), p.y()) for p in plane_b['polygon_points']]
+        # Convex hull of combined points
+        all_pts = pts_a + pts_b
+        if len(all_pts) < 3:
+            return
+        pts_sorted = sorted(set(all_pts))
+        def cross(o, x, y):
+            return (x[0]-o[0])*(y[1]-o[1]) - (x[1]-o[1])*(y[0]-o[0])
+        lower = []
+        for p in pts_sorted:
+            while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+                lower.pop()
+            lower.append(p)
+        upper = []
+        for p in reversed(pts_sorted):
+            while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+                upper.pop()
+            upper.append(p)
+        hull = lower[:-1] + upper[:-1]
+        # Remove plane B first (higher index)
+        self._delete_plane(b)
+        if a > b:
+            a -= 1
+        # Replace plane A with merged hull
+        plane_a['polygon_points'] = [QPointF(x, y) for x, y in hull]
+        plane_a['polygon_item'].setPolygon(QPolygonF(plane_a['polygon_points']))
+        self._update_outer_perimeter()
+        self._select_ai_plane(a)
+
+    def _delete_plane(self, idx: int) -> None:
+        """Remove a plane by index without UI cleanup."""
+        if idx < 0 or idx >= len(self._ai_planes):
+            return
+        plane = self._ai_planes[idx]
+        try:
+            if 'polygon_item' in plane and plane['polygon_item']:
+                self.scene.removeItem(plane['polygon_item'])
+        except: pass
+        del self._ai_planes[idx]
+
     def _select_ai_plane(self, index: int) -> None:
         """Select a detected AI plane for editing. Shows vertices for the selected plane and hides others."""
         if index == self._selected_ai_plane_index:
@@ -1431,6 +1560,28 @@ class RoofCanvas(QGraphicsView):
                 self.set_drawing_mode(False)
             return # Consume event in drawing mode
 
+        # Add-plane mode: handle clicks
+        if getattr(self, '_add_plane_mode', False):
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._add_plane_points.append(scene_pos)
+                pt = QGraphicsEllipseItem(scene_pos.x()-4, scene_pos.y()-4, 8, 8)
+                pt.setPen(QPen(QColor(255,255,0), 2))
+                pt.setBrush(QBrush(QColor(255,255,0,120)))
+                pt.setZValue(10)
+                self.scene.addItem(pt)
+                self._add_plane_items.append(pt)
+                if len(self._add_plane_points) >= 2:
+                    p1 = self._add_plane_points[-2]
+                    p2 = self._add_plane_points[-1]
+                    line = QGraphicsLineItem(p1.x(), p1.y(), p2.x(), p2.y())
+                    line.setPen(QPen(QColor(255,255,0), 2))
+                    line.setZValue(9)
+                    self.scene.addItem(line)
+                    self._add_plane_items.append(line)
+            elif event.button() == Qt.MouseButton.RightButton:
+                self._finalize_add_plane()
+            return
+
         # Check if click is on an AI polygon (select it)
         if event.button() == Qt.MouseButton.LeftButton and self._ai_planes and self._ai_overlay_active:
             pt = QPointF(scene_pos.x(), scene_pos.y())
@@ -1443,6 +1594,11 @@ class RoofCanvas(QGraphicsView):
                         hit_idx = idx
                         break
             if hit_idx >= 0:
+                # Merge mode: merge selected with clicked polygon
+                if getattr(self, '_merge_mode', False) and hit_idx != self._selected_ai_plane_index:
+                    self._merge_polygons(self._selected_ai_plane_index, hit_idx)
+                    self._merge_mode = False
+                    return
                 self._select_ai_plane(hit_idx)
                 self.ai_overlay_plane_selected.emit(hit_idx, [(float(p.x()), float(p.y())) for p in self._ai_planes[hit_idx]["polygon_points"]])
                 return  # consume event, no panning
@@ -1454,7 +1610,26 @@ class RoofCanvas(QGraphicsView):
         super().mousePressEvent(event)
 
     def keyPressEvent(self, event):
-        """Delete selected vertex with Delete key."""
+        """Delete vertex (Delete) or entire polygon (Shift+Delete)."""
+        # Shift+Delete: delete entire selected polygon
+        if (event.key() == Qt.Key.Key_Delete and
+            event.modifiers() & Qt.KeyboardModifier.ShiftModifier and
+            self._selected_ai_plane_index >= 0):
+            self._delete_selected_polygon()
+            return
+        # Shift+N: toggle add-plane drawing mode
+        if (event.key() == Qt.Key.Key_N and
+            event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            self._toggle_add_plane_mode()
+            return
+        # Shift+M: merge mode - click second polygon to merge with selected
+        if (event.key() == Qt.Key.Key_M and
+            event.modifiers() & Qt.KeyboardModifier.ShiftModifier and
+            self._selected_ai_plane_index >= 0):
+            self._merge_mode = not getattr(self, '_merge_mode', False)
+            print(f"Merge mode: {'ON' if self._merge_mode else 'OFF'}")
+            return
+        # Delete: delete closest vertex
         if event.key() == Qt.Key.Key_Delete and self._ai_vertex_items and self._selected_ai_plane_index >= 0:
             n = len(self._current_ai_polygon_points)
             if n <= 3:
