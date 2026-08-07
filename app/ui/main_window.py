@@ -418,7 +418,9 @@ class MainWindow(QMainWindow):
                     contour_np = np.array(vertices, dtype=np.float32).reshape(-1, 1, 2)
                     epsilon = 4.0  # pixels (~33cm at 12px/m)
                     simplified = cv2.approxPolyDP(contour_np, epsilon, True)
-                    vertices = [(float(pt[0][0]), float(pt[0][1])) for pt in simplified]
+                    new_verts = [(float(pt[0][0]), float(pt[0][1])) for pt in simplified]
+                    if len(new_verts) >= 3:
+                        vertices = new_verts
                 score = plane.get("score", 0.5)
                 meta = {
                     "area_m2": plane.get("area_m2"),
@@ -445,7 +447,11 @@ class MainWindow(QMainWindow):
                     except Exception:
                         pass
         except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
             print(f"Interactive polygon overlay failed: {e}")
+            print(tb)
+            QMessageBox.warning(self, "Overlay Error", f"Neuspesne zobrazenie interaktivnych polygonov:\n{e}\n\nPozri terminal pre detaily.")
 
         # Store for later 3D export
         self._last_fetch_result = result
