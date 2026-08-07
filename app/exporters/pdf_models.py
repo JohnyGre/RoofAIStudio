@@ -29,7 +29,6 @@ class CustomerReport:
     """
     Comprehensive data model holding all information required to generate a customer-facing PDF report.
     """
-    report_id: uuid.UUID = field(default_factory=uuid.uuid4)
     # Customer and Project Information
     customer_name: str
     customer_address: str
@@ -59,6 +58,7 @@ class CustomerReport:
     notes: Optional[str] = None
     signature_area_text: str = "Approved by:"
     report_date: date = field(default_factory=date.today)
+    report_id: uuid.UUID = field(default_factory=uuid.uuid4)
 
     # Material cost estimate
     roof_material_name: Optional[str] = None
