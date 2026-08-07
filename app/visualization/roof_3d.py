@@ -473,13 +473,7 @@ function createExtrudedPolygon(v2d, height, colorHex) {
   return { group, mesh, wire, vertices3D };
 }
 
-planes.forEach(plane => {
-  const v2d = extractVertices(plane.contour);
-  if (v2d.length < 3) return;
-  const colorHex = resolveColor(plane.color_name || "");
-  const height = plane.height || computeHeight(plane.class_name, plane.area_m2);
-
-});
+// planes.forEach moved to BUILD ROOF GEOMETRY section below
 
 // ============================================================
 // BUILD ROOF GEOMETRY - Per-plane extrusion with proper heights
