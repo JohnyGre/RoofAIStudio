@@ -87,6 +87,12 @@ def _build_true_outer_perimeter(edge_planes):
             boundary_edges.append((p1, p2))
     if len(boundary_edges) < 3:
         return []
+
+    # OPRAVA: zluc takmer-identicke vrcholy z roznych planov PRED retazenim
+    # hranic, inak drobne AI nepresnosti roztrhnu obrys a vyzaduje si to
+    # rucne mazanie bodov.
+    boundary_edges = _merge_close_vertices(boundary_edges, merge_tol=4.0)
+
     def key_of(pt):
         return (round(pt.x(), 2), round(pt.y(), 2))
     adjacency = {}
