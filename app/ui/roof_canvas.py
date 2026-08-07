@@ -363,6 +363,7 @@ class RoofCanvas(QGraphicsView):
         self._ai_polygon_item: Optional[QGraphicsPolygonItem] = None
         self._ai_vertex_items: List[DraggableVertexItem] = []
         self._ai_vertex_label_items: List[QGraphicsSimpleTextItem] = []
+        self._ai_edge_label_items: List[QGraphicsSimpleTextItem] = []
         self._current_ai_polygon_points: List[QPointF] = []
         # Area text item for AI overlay (shared, shows area for selected plane)
         self._ai_area_text_item: Optional[QGraphicsSimpleTextItem] = None
@@ -734,6 +735,9 @@ class RoofCanvas(QGraphicsView):
             label = self._ai_vertex_label_items[index]
             label.setPos(scene_pos + QPointF(6.0 / max(0.1, self._zoom_factor), -12.0 / max(0.1, self._zoom_factor)))
 
+        # Update edge labels
+        self._update_edge_labels()
+
         # Store pending move for debounce and restart timer
         try:
             self._debounce_pending[int(index)] = scene_pos
@@ -888,6 +892,10 @@ class RoofCanvas(QGraphicsView):
             except Exception:
                 pass
         self._ai_vertex_label_items.clear()
+        for el in self._ai_edge_label_items:
+            try: self.scene.removeItem(el)
+            except: pass
+        self._ai_edge_label_items.clear()
         self._current_ai_polygon_points.clear()
         # Remove area text if present
         if self._ai_area_text_item:
@@ -1197,17 +1205,8 @@ class RoofCanvas(QGraphicsView):
             self.scene.addItem(line)
             self._outer_perimeter_items.append(line)
             label_counts[label_sk] = (r, g, b)
-        view_tl = self.mapToScene(10, 30)
-        ly = view_tl.y()
-        for lkey, ltext in [("okap", "okap (odkvap)"), ("stit", "stit"), ("internal", "pomocna"),
-                             ("hreben", "hreben"), ("uzlabie", "uzlabie"), ("narozie", "narozie")]:
-            if lkey in label_counts:
-                r, g, b = label_counts[lkey]
-                item = QGraphicsSimpleTextItem(f"-- {ltext}")
-                item.setBrush(QBrush(QColor(r, g, b)))
-                item.setZValue(5); item.setPos(10, ly)
-                self.scene.addItem(item); self._outer_perimeter_items.append(item)
-                ly += 18
+        # Store classification for export (legend hidden from canvas)
+        self._edge_classification = label_counts
         logger.info("_update_outer_perimeter: classified %d edges, %d types", len(self._outer_perimeter_items) - len(label_counts), len(label_counts))
 
     def toggle_outer_perimeter(self) -> None:
@@ -1480,6 +1479,23 @@ class RoofCanvas(QGraphicsView):
         except: pass
         del self._ai_planes[idx]
 
+
+    def _update_edge_labels(self) -> None:
+        """Update edge length labels for the selected polygon."""
+        n = len(self._ai_edge_label_items)
+        pts = self._current_ai_polygon_points
+        if n != len(pts):
+            return
+        s = self._ai_overlay_px_per_m
+        for i in range(n):
+            j = (i + 1) % n
+            p1, p2 = pts[i], pts[j]
+            mx = (p1.x() + p2.x()) / 2
+            my = (p1.y() + p2.y()) / 2
+            length_m = round(((p2.x()-p1.x())**2 + (p2.y()-p1.y())**2)**0.5 / max(s, 0.1), 1)
+            self._ai_edge_label_items[i].setText(f"{length_m}m")
+            self._ai_edge_label_items[i].setPos(mx + 3, my - 12)
+
     def _select_ai_plane(self, index: int) -> None:
         """Select a detected AI plane for editing. Shows vertices for the selected plane and hides others."""
         if index == self._selected_ai_plane_index:
@@ -1497,6 +1513,10 @@ class RoofCanvas(QGraphicsView):
             except Exception:
                 pass
         self._ai_vertex_label_items.clear()
+        for el in self._ai_edge_label_items:
+            try: self.scene.removeItem(el)
+            except: pass
+        self._ai_edge_label_items.clear()
         # Reset polygon item visual for previous
         if 0 <= self._selected_ai_plane_index < len(self._ai_planes):
             prev = self._ai_planes[self._selected_ai_plane_index]
@@ -1541,6 +1561,27 @@ class RoofCanvas(QGraphicsView):
                v.enable_move_emits()
             except Exception:
                pass
+
+        # Create interactive edge labels (shown only for selected polygon)
+        for el in self._ai_edge_label_items:
+            try: self.scene.removeItem(el)
+            except: pass
+        self._ai_edge_label_items.clear()
+        n_pts = len(self._current_ai_polygon_points)
+        s = self._ai_overlay_px_per_m
+        for i in range(n_pts):
+            j = (i + 1) % n_pts
+            p1 = self._current_ai_polygon_points[i]
+            p2 = self._current_ai_polygon_points[j]
+            mx = (p1.x() + p2.x()) / 2
+            my = (p1.y() + p2.y()) / 2
+            length_m = round(((p2.x()-p1.x())**2 + (p2.y()-p1.y())**2)**0.5 / max(s, 0.1), 1)
+            label = QGraphicsSimpleTextItem(f"{length_m}m")
+            label.setBrush(QBrush(QColor(255, 255, 100)))
+            label.setZValue(3)
+            label.setPos(mx + 3, my - 12)
+            self.scene.addItem(label)
+            self._ai_edge_label_items.append(label)
 
         # Ensure area text exists
         if self._ai_area_text_item is None:

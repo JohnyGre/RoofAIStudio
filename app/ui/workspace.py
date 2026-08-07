@@ -77,6 +77,27 @@ class Workspace(QWidget):
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setStyleSheet("font-weight: bold; color: #ECF0F1;")
         layout.addWidget(label)
+
+        # Add tool shortcuts if this is the left panel
+        if object_name == "LeftPanel":
+            shortcuts_text = (
+                "<hr style='border-color:#556;margin:4px 0'>"
+                "<b>Nastroje:</b><br>"
+                "<small>"
+                "Shift+N = Pridat rovinu<br>"
+                "Shift+Delete = Vymazat rovinu<br>"
+                "Shift+M = Spojit (klikni 2.)<br>"
+                "Shift+S = Rozdelit (2 kliky)<br>"
+                "Delete = Vymazat vertex<br>"
+                "Dvojklik = Pridat vertex<br>"
+                "Pravy+tah = Posunut vertex"
+                "</small>"
+            )
+            tips = QLabel(shortcuts_text, panel)
+            tips.setWordWrap(True)
+            tips.setStyleSheet("color: #aab; font-size: 11px; padding: 4px;")
+            layout.addWidget(tips)
+
         layout.addStretch(1) # Push title to top
 
         return panel
