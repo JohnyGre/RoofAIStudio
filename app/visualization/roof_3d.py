@@ -515,6 +515,23 @@ if (planeObjects.length > 0) {
   camera.position.set(center.x + 28, center.y + 22, center.z + 32);
   camera.lookAt(center);
   controls.update();
+  // --- Edge classification lines ---
+  const EDGE_COLORS = {
+    okap: 0x00f0ff, stit: 0x64ff82, hreben: 0x3c3c3c,
+    narozie: 0xff504c, uzlabie: 0xb450ff, internal: 0xffc832
+  };
+  if (ROOF_DATA.edge_classes) {
+    for (const ec of ROOF_DATA.edge_classes) {
+      const color = EDGE_COLORS[ec.class] || 0x888888;
+      const egeom = new THREE.BufferGeometry();
+      const everts = new Float32Array([ec.x1, 0.02, ec.y1, ec.x2, 0.02, ec.y2]);
+      egeom.setAttribute('position', new THREE.BufferAttribute(everts, 3));
+      const emat = new THREE.LineBasicMaterial({ color });
+      const eline = new THREE.Line(egeom, emat);
+      scene.add(eline);
+    }
+  }
+
   document.getElementById("info-bar").textContent =
     `🏠 ${ROOF_DATA.address || "Strecha"} — ${planes.length} rovín`;
 }
@@ -611,30 +628,6 @@ function createSlopedPlane(v2d, vertexHeights, colorHex) {
 
   // Wireframe: polygon boundary edges
   const edgePts = [];
-
-  // --- Edge classification colors ---
-  const EDGE_COLORS = {
-    okap: 0x00f0ff,    // cyan
-    stit: 0x64ff82,    // green
-    hreben: 0x3c3c3c,  // dark grey
-    narozie: 0xff504c, // red
-    uzlabie: 0xb450ff,  // purple
-    internal: 0xffc832 // yellow
-  };
-  if (ROOF_DATA.edge_classes) {
-    for (const ec of ROOF_DATA.edge_classes) {
-      const color = EDGE_COLORS[ec.class] || 0x888888;
-      const geom = new THREE.BufferGeometry();
-      const verts = new Float32Array([
-        ec.x1, 0.01, ec.y1,
-        ec.x2, 0.01, ec.y2
-      ]);
-      geom.setAttribute('position', new THREE.BufferAttribute(verts, 3));
-      const mat = new THREE.LineBasicMaterial({ color, linewidth: 2 });
-      const line = new THREE.Line(geom, mat);
-      scene.add(line);
-    }
-  }
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
     edgePts.push(vertices3D[i].x, vertices3D[i].y, vertices3D[i].z);
