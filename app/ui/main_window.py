@@ -412,6 +412,13 @@ class MainWindow(QMainWindow):
                         vertices.append((float(pt[0][0]), float(pt[0][1])))
                     else:
                         vertices.append((float(pt[0]), float(pt[1])))
+                # Douglas-Peucker simplification (remove noise vertices)
+                if len(vertices) > 4:
+                    import numpy as np
+                    contour_np = np.array(vertices, dtype=np.float32).reshape(-1, 1, 2)
+                    epsilon = 4.0  # pixels (~33cm at 12px/m)
+                    simplified = cv2.approxPolyDP(contour_np, epsilon, True)
+                    vertices = [(float(pt[0][0]), float(pt[0][1])) for pt in simplified]
                 score = plane.get("score", 0.5)
                 meta = {
                     "area_m2": plane.get("area_m2"),
