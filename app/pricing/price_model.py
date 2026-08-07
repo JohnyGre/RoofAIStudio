@@ -12,10 +12,10 @@ class LaborRate:
     """
     Represents a labor rate for a specific task or skill.
     """
-    id: uuid.UUID = field(default_factory=uuid.uuid4)
     name: str
     unit: Literal["m2", "linear_m", "hour", "km", "piece"] # Unit of measurement for labor
     price: float # Price per unit
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
 
     def __post_init__(self):
         if self.price < 0:
@@ -26,11 +26,11 @@ class PriceRule:
     """
     Represents a pricing rule that can be applied as a percentage or fixed amount.
     """
-    id: uuid.UUID = field(default_factory=uuid.uuid4)
     name: str
     type: Literal["percentage", "fixed"]
     value: float # Percentage (e.g., 0.10 for 10%) or fixed amount
-    is_deduction: bool = False # True if this rule subtracts from the total (e.g., discount)
+    is_deduction: bool = False
+    id: uuid.UUID = field(default_factory=uuid.uuid4) # True if this rule subtracts from the total (e.g., discount)
 
     def __post_init__(self):
         if self.type == "percentage" and not (0 <= self.value <= 1):
@@ -43,7 +43,6 @@ class EstimateLine:
     """
     Represents a single line item in an estimate.
     """
-    id: uuid.UUID = field(default_factory=uuid.uuid4)
     description: str
     quantity: float
     unit_price: float
@@ -60,8 +59,8 @@ class Estimate:
     """
     Represents a complete customer estimate.
     """
-    id: uuid.UUID = field(default_factory=uuid.uuid4)
     name: str
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
     project_id: Optional[uuid.UUID] = None
     customer_id: Optional[uuid.UUID] = None
 
