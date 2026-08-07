@@ -156,6 +156,8 @@ class MainWindow(QMainWindow):
         self.tool_bar.calibrate_triggered.connect(self._on_calibrate_image_action) # Connect new toolbar action
         self.tool_bar.export_triggered.connect(self._on_export_3d)
         self.tool_bar.fetch_triggered.connect(self._on_fetch_address)
+        self.tool_bar.undo_triggered.connect(self.workspace.roof_canvas._undo)
+        self.tool_bar.redo_triggered.connect(self.workspace.roof_canvas._redo)
         self.menu_bar.fetch_address_triggered.connect(self._on_fetch_address)
 
         # ImageController Signals

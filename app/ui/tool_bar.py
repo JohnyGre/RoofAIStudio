@@ -21,6 +21,8 @@ class ToolBar(QToolBar):
     export_triggered = Signal()
     calibrate_triggered = Signal()
     fetch_triggered = Signal()  # Fetch satellite by address
+    undo_triggered = Signal()
+    redo_triggered = Signal()
 
     def __init__(self, parent=None):
         """
