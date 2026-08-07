@@ -558,9 +558,46 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No Data", "Ziadne polygony na export.")
             return
 
+        # Collect edge classifications from canvas overrides
+        edge_classes = {}
+        canvas_overrides = getattr(canvas, '_edge_class_overrides', {})
+        # Also get auto-classified edges from _update_outer_perimeter
+        # Build edge key -> class mapping from all planes
+        from collections import defaultdict
+        edge_owners = defaultdict(list)
+        for pi, plane in enumerate(canvas._ai_planes):
+            pts_p = plane.get("polygon_points", [])
+            if len(pts_p) < 3: continue
+            for vi in range(len(pts_p)):
+                vj = (vi + 1) % len(pts_p)
+                pa, pb = pts_p[vi], pts_p[vj]
+                xa, ya = pa.x(), pa.y()
+                xb, yb = pb.x(), pb.y()
+                if xa < xb or (xa == xb and ya < yb):
+                    ek = (xa, ya, xb, yb)
+                else:
+                    ek = (xb, yb, xa, ya)
+                edge_owners[ek].append(pi)
+        # For each edge, use override if available, otherwise mark as auto
+        edge_class_list = []
+        for ek, owners in edge_owners.items():
+            cls = canvas_overrides.get(ek, None)
+            if cls is None:
+                # Determine auto class based on owners count
+                cls = "internal" if len(owners) > 1 else "okap"
+            edge_class_list.append({
+                "x1": round(ek[0] / px_per_m, 3),
+                "y1": round(ek[1] / px_per_m, 3),
+                "x2": round(ek[2] / px_per_m, 3),
+                "y2": round(ek[3] / px_per_m, 3),
+                "class": cls,
+                "owners": len(owners),
+            })
+
         export_data = {
             "px_per_m": px_per_m, "address": address, "planes": planes_json,
             "ridge_height_m": 2.5, "slope_deg": 25.0,
+            "edge_classes": edge_class_list,
         }
         out_dir = Path(__file__).resolve().parent.parent.parent / "data" / "exports"
         out_dir.mkdir(parents=True, exist_ok=True)
