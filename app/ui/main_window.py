@@ -27,7 +27,7 @@ from app.ai.ai_result import DetectionResult, SegmentationResult, PolygonGeometr
 from app.geometry.point import Point2D # Added import for Point2D
 from app.geometry.polygon import Polygon2D
 from app.services.single_roof_analyzer import SingleRoofAnalyzer
-import webbrowser, json, os
+import webbrowser, json, os, math
 
 class MainWindow(QMainWindow):
     """
@@ -445,7 +445,7 @@ class MainWindow(QMainWindow):
         self._last_address = address.strip()
 
     def _on_export_3d(self) -> None:
-        """Export roof data to JSON and open 3D HTML viewer."""
+        """Export roof data to JSON with per-vertex heights and open 3D viewer."""
         from app.visualization.roof_3d import Roof3DExporter
         from pathlib import Path
         if not hasattr(self, '_last_fetch_result') or not self._last_fetch_result:
@@ -454,75 +454,81 @@ class MainWindow(QMainWindow):
         result = self._last_fetch_result
         address = getattr(self, '_last_address', 'Strecha')
         px_per_m = self.workspace.roof_canvas._ai_overlay_px_per_m or result.get("px_per_m", 12.1)
-        planes_json = []
-        raw_planes = result.get("planes", [])
-        for i, plane in enumerate(self.workspace.roof_canvas._ai_planes):
+        canvas = self.workspace.roof_canvas
+
+        # --- Build perimeter vertex set (in meters) ---
+        perimeter_pts = getattr(canvas, "_outer_perimeter_points", [])
+        perimeter_xy = [(p.x() / px_per_m, p.y() / px_per_m) for p in perimeter_pts] if perimeter_pts else []
+
+        def is_on_perimeter(vx, vy, tol_m=0.3):
+            for px, py in perimeter_xy:
+                if math.hypot(vx - px, vy - py) <= tol_m:
+                    return True
+            return False
+
+        def dist_point_to_segment(p, a, b):
+            px, py = p; ax, ay = a; bx, by = b
+            dx, dy = bx-ax, by-ay
+            L2 = dx*dx + dy*dy
+            if L2 < 1e-9:
+                return math.hypot(px-ax, py-ay)
+            t = max(0.0, min(1.0, ((px-ax)*dx + (py-ay)*dy) / L2))
+            return math.hypot(px-(ax+t*dx), py-(ay+t*dy))
+
+        # --- Collect all plane vertices in meters ---
+        planes_xy = []
+        for plane in canvas._ai_planes:
             pts = plane.get("polygon_points", [])
             if len(pts) < 3:
                 continue
-            contour = [[[p.x(), p.y()]] for p in pts]
-            n = len(pts)
+            planes_xy.append([(p.x() / px_per_m, p.y() / px_per_m) for p in pts])
+
+        # --- Compute per-vertex heights (v2: max across owning planes) ---
+        SLOPE_DEG = 25.0
+        FIXED_HEIGHT = 2.5
+        candidates = {}  # vkey -> set of heights
+        coords = {}
+
+        for plane in planes_xy:
+            n = len(plane)
+            on_perim = [is_on_perimeter(v[0], v[1]) for v in plane]
+            eave_edges = [(plane[i], plane[(i+1)%n]) for i in range(n)
+                          if on_perim[i] and on_perim[(i+1)%n]]
+            for i, v in enumerate(plane):
+                k = (round(v[0], 2), round(v[1], 2))
+                coords[k] = v
+                if on_perim[i]:
+                    candidates.setdefault(k, set()).add(0.0)
+                    continue
+                if eave_edges:
+                    d = min(dist_point_to_segment(v, a, b) for a, b in eave_edges)
+                else:
+                    d = min(math.hypot(v[0]-p[0], v[1]-p[1]) for p in perimeter_xy) if perimeter_xy else 5.0
+                # Fallback: if slope mode gives weird value (< 0.05m difference), use fixed
+                slope_h = d * math.tan(math.radians(SLOPE_DEG))
+                candidates.setdefault(k, set()).add(max(slope_h, FIXED_HEIGHT))
+
+        # Final height = max candidate per unique vertex
+        final_height = {k: max(vs) for k, vs in candidates.items()}
+
+        # --- Build JSON planes with per-vertex heights ---
+        planes_json = []
+        raw_planes = result.get("planes", [])
+        for i, plane_xy in enumerate(planes_xy):
+            n = len(plane_xy)
+            contour = [[[p[0] * px_per_m, p[1] * px_per_m]] for p in plane_xy]
+            vertex_heights = [round(final_height.get((round(v[0],2), round(v[1],2)), 0.0), 3) for v in plane_xy]
+
             area_px = 0.0
             for j in range(n):
-                x1, y1 = pts[j].x(), pts[j].y()
-                x2, y2 = pts[(j+1)%n].x(), pts[(j+1)%n].y()
+                x1, y1 = plane_xy[j][0] * px_per_m, plane_xy[j][1] * px_per_m
+                x2, y2 = plane_xy[(j+1)%n][0] * px_per_m, plane_xy[(j+1)%n][1] * px_per_m
                 area_px += x1*y2 - x2*y1
             area_m2 = abs(area_px) / (2 * px_per_m * px_per_m)
-            peri_px = 0.0
-            edge_details = []
-            for j in range(n):
-                x1, y1 = pts[j].x(), pts[j].y()
-                x2, y2 = pts[(j+1)%n].x(), pts[(j+1)%n].y()
-                d_px = ((x2-x1)**2 + (y2-y1)**2)**0.5
-                peri_px += d_px
-                edge_details.append({"index": j, "length_m": round(d_px/px_per_m, 2),
-                                     "p1_px": [x1, y1], "p2_px": [x2, y2]})
-            peri_m = peri_px / px_per_m
-            # Height: compute per-vertex from canvas edge classification
-            # Collect classified edges from canvas for this plane
-            height = 0.0
-            try:
-                canvas = self.workspace.roof_canvas
-                # Recompute edge classification to get per-plane ridge edges
-                from collections import defaultdict
-                all_ai_planes = canvas._ai_planes
-                edge_map = defaultdict(list)
-                centroids = {}
-                for pi, ap in enumerate(all_ai_planes):
-                    apts = ap.get("polygon_points", [])
-                    if len(apts) < 3:
-                        continue
-                    cx = sum(p.x() for p in apts) / len(apts)
-                    cy = sum(p.y() for p in apts) / len(apts)
-                    centroids[pi] = (cx, cy)
-                    for vi in range(len(apts)):
-                        vj = (vi + 1) % len(apts)
-                        p1, p2 = apts[vi], apts[vj]
-                        x1, y1 = p1.x(), p1.y()
-                        x2, y2 = p2.x(), p2.y()
-                        if x1 < x2 or (x1 == x2 and y1 < y2):
-                            key = (x1, y1, x2, y2)
-                        else:
-                            key = (x2, y2, x1, y1)
-                        edge_map[key].append((pi, p1, p2))
-                # Check edges of this plane - any with 2 owners AND not perimeter = ridge
-                apts = all_ai_planes[i].get("polygon_points", [])
-                for vi in range(len(apts)):
-                    vj = (vi + 1) % len(apts)
-                    p1, p2 = apts[vi], apts[vj]
-                    x1, y1 = p1.x(), p1.y()
-                    x2, y2 = p2.x(), p2.y()
-                    if x1 < x2 or (x1 == x2 and y1 < y2):
-                        key = (x1, y1, x2, y2)
-                    else:
-                        key = (x2, y2, x1, y1)
-                    owners = edge_map.get(key, [])
-                    if len(owners) >= 2:
-                        # Shared edge = internal = likely ridge or hip/valley
-                        height = 2.4
-                        break
-            except Exception:
-                pass
+            peri_m = sum(math.hypot(
+                (plane_xy[(j+1)%n][0] - plane_xy[j][0]) * px_per_m,
+                (plane_xy[(j+1)%n][1] - plane_xy[j][1]) * px_per_m) / px_per_m for j in range(n))
+
             planes_json.append({
                 "id": "plane_%d" % i,
                 "class_name": "slope_poly",
@@ -530,14 +536,18 @@ class MainWindow(QMainWindow):
                 "area_m2": round(area_m2, 1),
                 "perimeter_m": round(peri_m, 1),
                 "contour": contour,
-                "edge_details": edge_details,
+                "vertex_heights": vertex_heights,
                 "score": raw_planes[i].get("score", 0.9) if i < len(raw_planes) else 0.9,
-                "height": round(height, 2),
             })
+
         if not planes_json:
             QMessageBox.warning(self, "No Data", "Ziadne polygony na export.")
             return
-        export_data = {"px_per_m": px_per_m, "address": address, "planes": planes_json, "ridge_height_m": 2.4}
+
+        export_data = {
+            "px_per_m": px_per_m, "address": address, "planes": planes_json,
+            "ridge_height_m": 2.5, "slope_deg": 25.0,
+        }
         out_dir = Path.home() / ".roof_ai_studio" / "exports"
         out_dir.mkdir(parents=True, exist_ok=True)
         json_path = out_dir / "roof_export.json"
@@ -550,7 +560,6 @@ class MainWindow(QMainWindow):
             self.status_bar.set_status_message("3D export: " + str(html_path))
         except Exception as e:
             QMessageBox.critical(self, "Export Error", "Failed to generate 3D: " + str(e))
-
     def _on_about(self) -> None:
         self.status_bar.set_status_message("Action: About")
         print("About triggered")

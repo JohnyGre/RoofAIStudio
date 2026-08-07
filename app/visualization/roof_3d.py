@@ -490,7 +490,8 @@ planes.forEach(plane => {
   if (v2d.length < 3) return;
   const colorHex = resolveColor(plane.color_name || "");
   const height = plane.height || computeHeight(plane.class_name, plane.area_m2);
-  const { group, mesh, wire, vertices3D } = createExtrudedPolygon(v2d, height, colorHex);
+  const vertexHeights = plane.vertex_heights || v2d.map(() => height);
+  const { group, mesh, wire, vertices3D } = createSlopedPlane(v2d, vertexHeights, colorHex);
 
   group.userData = {
     id: plane.id,
@@ -500,7 +501,7 @@ planes.forEach(plane => {
     perimeter_m: plane.perimeter_m,
     edge_details: plane.edge_details || [],
     score: plane.score,
-    height: height,
+    height: Math.max(...vertexHeights),
     colorHex: colorHex,
   };
 
@@ -571,6 +572,65 @@ function resetAllHighlight() {
     if (po.wire) { po.wire.material.color.set(0x000000); po.wire.material.opacity = 0.18; }
   });
 }
+
+function createSlopedPlane(v2d, vertexHeights, colorHex) {
+  // Build a sloped roof plane from 2D contour + per-vertex heights.
+  // Fan-triangulate the polygon in XZ plane with Y = per-vertex height.
+  const group = new THREE.Group();
+  const n = v2d.length;
+  if (n < 3) return { group, vertices3D: [] };
+
+  const vertices3D = v2d.map(([x, z], i) =>
+    new THREE.Vector3(x, vertexHeights[i] || 0, z));
+
+  // Build BufferGeometry with fan triangulation
+  const positions = [];
+  const normals = [];
+  for (let i = 1; i < n - 1; i++) {
+    const a = vertices3D[0], b = vertices3D[i], c = vertices3D[i + 1];
+    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+    const ab = new THREE.Vector3().subVectors(b, a);
+    const ac = new THREE.Vector3().subVectors(c, a);
+    const nrm = new THREE.Vector3().crossVectors(ab, ac).normalize();
+    if (nrm.y < 0) nrm.negate();
+    for (let k = 0; k < 3; k++) normals.push(nrm.x, nrm.y, nrm.z);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+
+  const mat = new THREE.MeshStandardMaterial({
+    color: colorHex,
+    roughness: 0.5,
+    metalness: 0.05,
+    side: THREE.DoubleSide,
+    depthWrite: true,
+  });
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.name = "roof-plane";
+  group.add(mesh);
+
+  // Wireframe: polygon boundary edges
+  const edgePts = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    edgePts.push(vertices3D[i].x, vertices3D[i].y, vertices3D[i].z);
+    edgePts.push(vertices3D[j].x, vertices3D[j].y, vertices3D[j].z);
+  }
+  const wireGeo = new THREE.BufferGeometry();
+  wireGeo.setAttribute("position", new THREE.Float32BufferAttribute(edgePts, 3));
+  const wireMat = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 });
+  const wire = new THREE.LineSegments(wireGeo, wireMat);
+  wire.visible = true;
+  group.add(wire);
+
+  return { group, mesh, wire, vertices3D };
+}
+
 
 function highlightPlane(po, color = 0xffff88) {
   po.mesh.material.emissive = new THREE.Color(color);
