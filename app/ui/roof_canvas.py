@@ -1343,6 +1343,143 @@ class RoofCanvas(QGraphicsView):
         except: pass
         del self._ai_planes[idx]
 
+
+    # --- Split mode ---
+    def _split_click(self, pos: QPointF) -> None:
+        """Record a split point on the polygon boundary."""
+        pts = self._current_ai_polygon_points
+        n = len(pts)
+        # Find closest edge
+        best_dist, best_t, best_i = float('inf'), 0.0, -1
+        for i in range(n):
+            j = (i + 1) % n
+            p1, p2 = pts[i], pts[j]
+            dx, dy = p2.x() - p1.x(), p2.y() - p1.y()
+            L2 = dx*dx + dy*dy
+            if L2 < 1:
+                d = ((pos.x()-p1.x())**2 + (pos.y()-p1.y())**2)**0.5
+            else:
+                t = max(0.0, min(1.0, ((pos.x()-p1.x())*dx + (pos.y()-p1.y())*dy) / L2))
+                proj_x, proj_y = p1.x() + t*dx, p1.y() + t*dy
+                d = ((pos.x()-proj_x)**2 + (pos.y()-proj_y)**2)**0.5
+            if d < best_dist and d < 25:
+                best_dist, best_i = d, i
+                if L2 >= 1:
+                    best_t = max(0.0, min(1.0, ((pos.x()-p1.x())*dx + (pos.y()-p1.y())*dy) / L2))
+                else:
+                    best_t = 0.5
+
+        if best_i < 0:
+            return
+        # Calculate intersection point
+        p1, p2 = pts[best_i], pts[(best_i+1)%n]
+        ix = p1.x() + best_t * (p2.x() - p1.x())
+        iy = p1.y() + best_t * (p2.y() - p1.y())
+        split_pt = QPointF(ix, iy)
+
+        # Mark point
+        marker = QGraphicsEllipseItem(ix-5, iy-5, 10, 10)
+        marker.setPen(QPen(QColor(255, 255, 0), 2))
+        marker.setBrush(QBrush(QColor(255, 255, 0, 120)))
+        marker.setZValue(10)
+        self.scene.addItem(marker)
+        self._split_markers.append(marker)
+        self._split_points.append((split_pt, best_i, best_t))
+
+        if len(self._split_points) == 2:
+            self._execute_split()
+
+    def _execute_split(self) -> None:
+        """Split the selected polygon into two along the split line."""
+        pts = self._current_ai_polygon_points
+        n = len(pts)
+        # Clean up markers
+        for m in self._split_markers:
+            try: self.scene.removeItem(m)
+            except: pass
+        self._split_markers = []
+        self._split_mode = False
+
+        if len(self._split_points) != 2:
+            return
+
+        # Sort split points by edge index
+        sp = sorted(self._split_points, key=lambda x: x[1])
+        (pt_a, i_a, t_a), (pt_b, i_b, t_b) = sp
+
+        if i_a == i_b:
+            return  # Same edge, can't split meaningfully
+
+        # Build two vertex lists by walking around the polygon
+        # Path 1: i_a -> i_b (through the split points)
+        # Path 2: i_b -> i_a (the other way around)
+        def build_path(start_i, start_t, end_i, end_t, go_forward=True):
+            path = [QPointF(
+                pts[start_i].x() + start_t * (pts[(start_i+1)%n].x() - pts[start_i].x()),
+                pts[start_i].y() + start_t * (pts[(start_i+1)%n].y() - pts[start_i].y())
+            )]
+            cur = (start_i + 1) % n if go_forward else start_i
+            target = end_i if go_forward else (end_i + 1) % n
+            while cur != target:
+                path.append(QPointF(pts[cur].x(), pts[cur].y()))
+                cur = (cur + 1) % n if go_forward else (cur - 1 + n) % n
+            end_pt = QPointF(
+                pts[end_i].x() + end_t * (pts[(end_i+1)%n].x() - pts[end_i].x()),
+                pts[end_i].y() + end_t * (pts[(end_i+1)%n].y() - pts[end_i].y())
+            )
+            path.append(end_pt)
+            return path
+
+        poly1 = build_path(i_a, t_a, i_b, t_b, True)
+        poly2 = build_path(i_b, t_b, i_a, t_a, True)
+
+        if len(poly1) < 3 or len(poly2) < 3:
+            return
+
+        # Delete original polygon and add two new ones
+        idx = self._selected_ai_plane_index
+        self._delete_plane_quiet(idx)
+
+        for poly in [poly1, poly2]:
+            qpoly = QPolygonF(poly)
+            color = self._ai_plane_colors[len(self._ai_planes) % len(self._ai_plane_colors)]
+            pen = QPen(color, 2)
+            poly_item = QGraphicsPolygonItem(qpoly)
+            poly_item.setPen(pen)
+            poly_item.setBrush(Qt.NoBrush)
+            poly_item.setZValue(1)
+            self.scene.addItem(poly_item)
+            self._ai_overlay_items.append(poly_item)
+            self._ai_planes.append({
+                'polygon_item': poly_item,
+                'polygon_points': poly,
+                'color': color,
+            })
+
+        self._selected_ai_plane_index = -1
+        self._ai_polygon_item = None
+        self._current_ai_polygon_points = []
+        for v in self._ai_vertex_items:
+            try: self.scene.removeItem(v)
+            except: pass
+        self._ai_vertex_items.clear()
+        for lb in self._ai_vertex_label_items:
+            try: self.scene.removeItem(lb)
+            except: pass
+        self._ai_vertex_label_items.clear()
+        self._update_outer_perimeter()
+
+    def _delete_plane_quiet(self, idx: int) -> None:
+        """Remove a plane by index - called during split (don't rebuild perimeter)."""
+        if idx < 0 or idx >= len(self._ai_planes):
+            return
+        plane = self._ai_planes[idx]
+        try:
+            if 'polygon_item' in plane and plane['polygon_item']:
+                self.scene.removeItem(plane['polygon_item'])
+        except: pass
+        del self._ai_planes[idx]
+
     def _select_ai_plane(self, index: int) -> None:
         """Select a detected AI plane for editing. Shows vertices for the selected plane and hides others."""
         if index == self._selected_ai_plane_index:
@@ -1594,6 +1731,11 @@ class RoofCanvas(QGraphicsView):
                         hit_idx = idx
                         break
             if hit_idx >= 0:
+                # Split mode: click on boundary of selected polygon
+                if (getattr(self, '_split_mode', False) and
+                    hit_idx == self._selected_ai_plane_index):
+                    self._split_click(scene_pos)
+                    return
                 # Merge mode: merge selected with clicked polygon
                 if getattr(self, '_merge_mode', False) and hit_idx != self._selected_ai_plane_index:
                     self._merge_polygons(self._selected_ai_plane_index, hit_idx)
@@ -1628,6 +1770,15 @@ class RoofCanvas(QGraphicsView):
             self._selected_ai_plane_index >= 0):
             self._merge_mode = not getattr(self, '_merge_mode', False)
             print(f"Merge mode: {'ON' if self._merge_mode else 'OFF'}")
+            return
+        # Shift+S: split mode - click two points on polygon boundary
+        if (event.key() == Qt.Key.Key_S and
+            event.modifiers() & Qt.KeyboardModifier.ShiftModifier and
+            self._selected_ai_plane_index >= 0):
+            self._split_mode = not getattr(self, '_split_mode', False)
+            self._split_points = []
+            self._split_markers = []
+            print(f"Split mode: {'ON' if self._split_mode else 'OFF'}")
             return
         # Delete: delete closest vertex
         if event.key() == Qt.Key.Key_Delete and self._ai_vertex_items and self._selected_ai_plane_index >= 0:
