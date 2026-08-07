@@ -78,6 +78,47 @@ def _classify_hip_or_valley(p1, p2, perimeter, tolerance=3.0):
             return "narozie" if is_convex else "uzlabie"
     return "narozie"
 
+def _merge_close_vertices(boundary_edges, merge_tol=4.0):
+    """Zlucenie blizkych vrcholov union-find algoritmom pred retazenim hranic."""
+    points = []
+    for p1, p2 in boundary_edges:
+        points.append((p1.x(), p1.y()))
+        points.append((p2.x(), p2.y()))
+    n = len(points)
+    parent = list(range(n))
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    def union(i, j):
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[ri] = rj
+    for i in range(n):
+        for j in range(i + 1, n):
+            dx = points[i][0] - points[j][0]
+            dy = points[i][1] - points[j][1]
+            if (dx * dx + dy * dy) ** 0.5 <= merge_tol:
+                union(i, j)
+    groups = {}
+    for i in range(n):
+        r = find(i)
+        groups.setdefault(r, []).append(points[i])
+    representative = {}
+    for r, pts in groups.items():
+        avg_x = sum(p[0] for p in pts) / len(pts)
+        avg_y = sum(p[1] for p in pts) / len(pts)
+        representative[r] = QPointF(avg_x, avg_y)
+    merged_edges = []
+    idx = 0
+    for p1, p2 in boundary_edges:
+        r1 = find(idx); idx += 1
+        r2 = find(idx); idx += 1
+        merged_edges.append((representative[r1], representative[r2]))
+    return merged_edges
+
+
 def _build_true_outer_perimeter(edge_planes):
     '''Posklada skutocny (aj reflexny) obrys celej strechy z hran s 1 vlastnikom.'''
     boundary_edges = []
