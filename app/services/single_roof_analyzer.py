@@ -566,53 +566,9 @@ class SingleRoofAnalyzer:
 
         vis = cv2.addWeighted(overlay, alpha, vis, 1 - alpha, 0)
 
-        # --- Legend: polygon summary in bottom-left ---
-        legend_x, legend_y = 8, vis.shape[0] - 8
-        line_h = 14
-        font_scale = 0.32
-        # Sort by area descending
-        sorted_planes = sorted(planes, key=lambda p: p.get("area_m2", 0), reverse=True)
-
-        # Compute total legend height
-        total_lines = 0
-        for p in sorted_planes:
-            total_lines += 2  # header + edges
-        legend_height = total_lines * line_h + 12
-
-        # Semi-transparent background
-        roi = vis[legend_y - legend_height:legend_y, legend_x:legend_x + 220]
-        if roi.size > 0:
-            dark = np.zeros_like(roi)
-            vis[legend_y - legend_height:legend_y, legend_x:legend_x + 220] = cv2.addWeighted(
-                roi, 0.30, dark, 0.70, 0)
-
-        y = legend_y - legend_height + 14
-        for i, p in enumerate(sorted_planes):
-            color = colors[i % len(colors)]
-            class_name = p.get("class_name", "roof")
-            area = p.get("area_m2", 0)
-            peri = p.get("perimeter_m", 0)
-            color_name = p.get("color_name", "")
-
-            # Color square + header
-            cv2.rectangle(vis, (legend_x + 2, y - 8), (legend_x + 14, y + 4), color, -1)
-            header = f"{class_name}  {area:.1f}m2  P={peri:.1f}m"
-            cv2.putText(vis, header, (legend_x + 18, y),
-                       cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255,255,255), 1, cv2.LINE_AA)
-            y += line_h
-
-            # Edge lengths
-            edges = p.get("edge_details", [])
-            if edges:
-                edge_strs = []
-                for e in edges:
-                    L = e["length_m"]
-                    edge_strs.append(f"{L:.1f}" if L >= 1 else f"{L:.2f}")
-                edge_line = "hrany: " + ", ".join(edge_strs) + " m"
-                cv2.putText(vis, edge_line, (legend_x + 18, y),
-                           cv2.FONT_HERSHEY_SIMPLEX, font_scale, (200,200,200), 1, cv2.LINE_AA)
-            y += line_h
-
+        # --- Legend disabled (shown in GUI instead) ---
+        # Legend data stored for export
+        self._legend_data = [{'color': p.get('color_name',''), 'class': p.get('class_name',''), 'area': p.get('area_m2',0), 'perimeter': p.get('perimeter_m',0)} for p in planes]
         return vis
 
     def unload(self):
