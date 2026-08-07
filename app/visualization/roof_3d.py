@@ -495,7 +495,7 @@ planes.forEach(plane => {
     perimeter_m: plane.perimeter_m,
     edge_details: plane.edge_details || [],
     score: plane.score,
-    height: Math.max(...vertexHeights),
+    height: Math.max(...(vertexHeights && vertexHeights.length > 0 ? vertexHeights : [height || 0])),
     colorHex: colorHex,
   };
 
