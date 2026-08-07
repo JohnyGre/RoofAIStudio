@@ -422,6 +422,11 @@ class MainWindow(QMainWindow):
                     if len(new_verts) >= 3:
                         vertices = new_verts
                 score = plane.get("score", 0.5)
+                # Confidence filter: skip low-confidence detections
+                CONF_THRESHOLD = 0.3
+                if score < CONF_THRESHOLD:
+                    print(f"  Skipping plane {i}: confidence {score:.2f} < {CONF_THRESHOLD}")
+                    continue
                 meta = {
                     "area_m2": plane.get("area_m2"),
                     "perimeter_m": plane.get("perimeter_m"),

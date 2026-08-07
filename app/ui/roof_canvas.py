@@ -374,6 +374,9 @@ class RoofCanvas(QGraphicsView):
         self._debounce_timer.timeout.connect(self._flush_debounced_moves)
         self._debounce_pending: dict = {}
         self._edge_class_overrides: dict = {}  # edge_key -> label_sk
+        self._undo_stack: list = []
+        self._redo_stack: list = []
+        self._max_undo = 50
         # Color palette for planes
         self._ai_plane_colors = [QColor(0, 170, 0), QColor(0, 85, 170), QColor(170, 85, 0), QColor(170, 0, 170), QColor(85,170,85)]
         # Connect internal overlay move signal to handler
@@ -1395,6 +1398,7 @@ class RoofCanvas(QGraphicsView):
         self._split_points.append((split_pt, best_i, best_t))
 
         if len(self._split_points) == 2:
+            self._push_undo()
             self._execute_split()
 
     def _execute_split(self) -> None:
@@ -1580,6 +1584,7 @@ class RoofCanvas(QGraphicsView):
             next_idx = (cycle.index(current) + 1) % len(cycle)
         except ValueError:
             next_idx = 0
+        self._push_undo()
         self._edge_class_overrides[key] = cycle[next_idx]
         print(f"Edge {best_i} (owners={num_owners}): {current} -> {cycle[next_idx]}")
 
@@ -1613,6 +1618,114 @@ class RoofCanvas(QGraphicsView):
             length_m = round(((p2.x()-p1.x())**2 + (p2.y()-p1.y())**2)**0.5 / max(s, 0.1), 1)
             self._ai_edge_label_items[i].setText(f"{length_m}m")
             self._ai_edge_label_items[i].setPos(mx + 3, my - 12)
+
+
+    def _push_undo(self) -> None:
+        """Save current state to undo stack."""
+        import copy
+        snapshot = {
+            'planes': [
+                {
+                    'polygon_points': [QPointF(p.x(), p.y()) for p in pl.get('polygon_points', [])],
+                    'color': pl.get('color'),
+                }
+                for pl in self._ai_planes
+            ],
+            'overrides': dict(self._edge_class_overrides),
+        }
+        self._undo_stack.append(snapshot)
+        if len(self._undo_stack) > self._max_undo:
+            self._undo_stack.pop(0)
+        self._redo_stack.clear()
+
+    def _undo(self) -> None:
+        """Undo last action."""
+        if not self._undo_stack:
+            return
+        # Save current state to redo stack
+        import copy
+        current = {
+            'planes': [
+                {
+                    'polygon_points': [QPointF(p.x(), p.y()) for p in pl.get('polygon_points', [])],
+                    'color': pl.get('color'),
+                }
+                for pl in self._ai_planes
+            ],
+            'overrides': dict(self._edge_class_overrides),
+        }
+        self._redo_stack.append(current)
+        # Restore previous state
+        snap = self._undo_stack.pop()
+        self._restore_state(snap)
+        print(f"Undo: {len(self._undo_stack)} left, {len(self._redo_stack)} redo")
+
+    def _redo(self) -> None:
+        """Redo last undone action."""
+        if not self._redo_stack:
+            return
+        import copy
+        current = {
+            'planes': [
+                {
+                    'polygon_points': [QPointF(p.x(), p.y()) for p in pl.get('polygon_points', [])],
+                    'color': pl.get('color'),
+                }
+                for pl in self._ai_planes
+            ],
+            'overrides': dict(self._edge_class_overrides),
+        }
+        self._undo_stack.append(current)
+        snap = self._redo_stack.pop()
+        self._restore_state(snap)
+        print(f"Redo: {len(self._undo_stack)} undo, {len(self._redo_stack)} left")
+
+    def _restore_state(self, snap: dict) -> None:
+        """Restore a saved state snapshot."""
+        # Clear current planes
+        for pl in self._ai_planes:
+            try:
+                if 'polygon_item' in pl and pl['polygon_item']:
+                    self.scene.removeItem(pl['polygon_item'])
+            except: pass
+        self._ai_planes.clear()
+        # Clear vertex items
+        for v in self._ai_vertex_items:
+            try: self.scene.removeItem(v)
+            except: pass
+        self._ai_vertex_items.clear()
+        for l in self._ai_vertex_label_items:
+            try: self.scene.removeItem(l)
+            except: pass
+        self._ai_vertex_label_items.clear()
+        for el in self._ai_edge_label_items:
+            try: self.scene.removeItem(el)
+            except: pass
+        self._ai_edge_label_items.clear()
+        # Restore planes
+        for pl_data in snap['planes']:
+            pts = pl_data['polygon_points']
+            color = pl_data.get('color', self._ai_plane_colors[0])
+            qpoly = QPolygonF(pts)
+            pen = QPen(color, 2)
+            poly_item = QGraphicsPolygonItem(qpoly)
+            poly_item.setPen(pen)
+            poly_item.setBrush(Qt.NoBrush)
+            poly_item.setZValue(1)
+            self.scene.addItem(poly_item)
+            self._ai_overlay_items.append(poly_item)
+            self._ai_planes.append({
+                'polygon_item': poly_item,
+                'polygon_points': pts,
+                'color': color,
+            })
+        # Restore overrides
+        self._edge_class_overrides = dict(snap.get('overrides', {}))
+        self._selected_ai_plane_index = -1
+        self._ai_polygon_item = None
+        self._current_ai_polygon_points = []
+        self._update_outer_perimeter()
+
 
     def _select_ai_plane(self, index: int) -> None:
         """Select a detected AI plane for editing. Shows vertices for the selected plane and hides others."""
@@ -1902,6 +2015,7 @@ class RoofCanvas(QGraphicsView):
                     return
                 # Merge mode: merge selected with clicked polygon
                 if getattr(self, '_merge_mode', False) and hit_idx != self._selected_ai_plane_index:
+                    self._push_undo()
                     self._merge_polygons(self._selected_ai_plane_index, hit_idx)
                     self._merge_mode = False
                     return
@@ -1917,10 +2031,20 @@ class RoofCanvas(QGraphicsView):
 
     def keyPressEvent(self, event):
         """Delete vertex (Delete) or entire polygon (Shift+Delete)."""
+        # Ctrl+Z: Undo
+        if event.key() == Qt.Key.Key_Z and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self._undo()
+            return
+        # Ctrl+Y or Ctrl+Shift+Z: Redo
+        if ((event.key() == Qt.Key.Key_Y and event.modifiers() & Qt.KeyboardModifier.ControlModifier) or
+            (event.key() == Qt.Key.Key_Z and event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier))):
+            self._redo()
+            return
         # Shift+Delete: delete entire selected polygon
         if (event.key() == Qt.Key.Key_Delete and
             event.modifiers() & Qt.KeyboardModifier.ShiftModifier and
             self._selected_ai_plane_index >= 0):
+            self._push_undo()
             self._delete_selected_polygon()
             return
         # Shift+N: toggle add-plane drawing mode
