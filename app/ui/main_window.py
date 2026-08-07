@@ -549,7 +549,7 @@ class MainWindow(QMainWindow):
             "px_per_m": px_per_m, "address": address, "planes": planes_json,
             "ridge_height_m": 2.5, "slope_deg": 25.0,
         }
-        out_dir = Path.home() / ".roof_ai_studio" / "exports"
+        out_dir = Path(__file__).resolve().parent.parent.parent / "data" / "exports"
         out_dir.mkdir(parents=True, exist_ok=True)
         json_path = out_dir / "roof_export.json"
         html_path = out_dir / "roof_3d_viewer.html"
@@ -558,7 +558,7 @@ class MainWindow(QMainWindow):
         try:
             Roof3DExporter.export_to_html(str(json_path), str(html_path))
             webbrowser.open(str(html_path))
-            self.status_bar.set_status_message("3D export: " + str(html_path))
+            self.status_bar.set_status_message(f"3D export hotovy: {address} -> {html_path}")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", "Failed to generate 3D: " + str(e))
     def _on_about(self) -> None:
