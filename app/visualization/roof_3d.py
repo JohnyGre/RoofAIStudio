@@ -315,6 +315,7 @@ function resolveColor(name) {
 }
 
 function hexToCSS(hex) {
+  if (hex == null || isNaN(hex)) return "#888888";
   return "#" + hex.toString(16).padStart(6, "0");
 }
 
@@ -534,7 +535,7 @@ function buildLegend() {
     const key = d.color_name + "|" + d.class_name;
     if (seenColors.has(key)) continue;
     seenColors.add(key);
-    const css = hexToCSS(d.colorHex);
+    const css = hexToCSS(d.colorHex || 0x888888);
     html += `<div class="leg-row"><span class="leg-swatch" style="background:${css}"></span>${d.color_name} — ${typeLabels[d.class_name] || d.class_name}</div>`;
   }
   legend.innerHTML = html;
