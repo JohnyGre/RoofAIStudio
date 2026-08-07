@@ -1500,7 +1500,7 @@ class RoofCanvas(QGraphicsView):
         if best_i < 0:
             return
 
-        # Build edge key
+        # Build edge key (normalized: smaller point first)
         i, j = best_i, (best_i + 1) % n
         p1, p2 = pts[i], pts[j]
         x1, y1, x2, y2 = p1.x(), p1.y(), p2.x(), p2.y()
@@ -1509,51 +1509,79 @@ class RoofCanvas(QGraphicsView):
         else:
             key = (x2, y2, x1, y1)
 
-        # Cycle classification
-        # Determine current class from overrides or re-classify
+        # Count owners for this edge across ALL planes
+        from collections import defaultdict
+        all_ai = self._ai_planes
+        owners = []
+        for pi, ap in enumerate(all_ai):
+            apts = ap.get("polygon_points", [])
+            if len(apts) < 3:
+                continue
+            for vi in range(len(apts)):
+                vj = (vi + 1) % len(apts)
+                pa, pb = apts[vi], apts[vj]
+                xa, ya = pa.x(), pa.y()
+                xb, yb = pb.x(), pb.y()
+                if xa < xb or (xa == xb and ya < yb):
+                    ek = (xa, ya, xb, yb)
+                else:
+                    ek = (xb, yb, xa, ya)
+                if ek == key:
+                    owners.append((pi, pa, pb))
+
+        num_owners = len(owners)
+
+        # Determine current class
         current = self._edge_class_overrides.get(key)
         if not current:
-            # Need to determine current class - re-run classification
-            from collections import defaultdict
-            edge_planes_test = defaultdict(list)
-            all_ai = self._ai_planes
+            # Re-run classification to get the auto-detected class
             centroids_test = {}
             for pi, ap in enumerate(all_ai):
                 apts = ap.get("polygon_points", [])
-                if len(apts) < 3: continue
+                if len(apts) < 3:
+                    continue
                 cx = sum(p.x() for p in apts) / len(apts)
                 cy = sum(p.y() for p in apts) / len(apts)
                 centroids_test[pi] = (cx, cy)
-                for vi in range(len(apts)):
-                    vj = (vi + 1) % len(apts)
-                    pa, pb = apts[vi], apts[vj]
-                    xa, ya = pa.x(), pa.y()
-                    xb, yb = pb.x(), pb.y()
-                    if xa < xb or (xa == xb and ya < yb):
-                        ek = (xa, ya, xb, yb)
-                    else:
-                        ek = (xb, yb, xa, ya)
-                    edge_planes_test[ek].append((pi, pa, pb))
-            owners = edge_planes_test.get(key, [])
             centroids_for_edge = [centroids_test[pi] for pi, _, _ in owners]
             all_pts = [(p.x(), p.y()) for ap in all_ai for p in ap.get("polygon_points", [])]
             hull_edges = self._compute_convex_hull_edges(all_pts)
+            okap_dir = getattr(self, '_okap_dir', None)
+            if not okap_dir:
+                # Fallback: compute on the fly
+                edge_planes_full = defaultdict(list)
+                for pi, ap in enumerate(all_ai):
+                    apts = ap.get("polygon_points", [])
+                    if len(apts) < 3:
+                        continue
+                    for vi in range(len(apts)):
+                        vj = (vi + 1) % len(apts)
+                        pa, pb = apts[vi], apts[vj]
+                        xa, ya = pa.x(), pa.y()
+                        xb, yb = pb.x(), pb.y()
+                        if xa < xb or (xa == xb and ya < yb):
+                            ek = (xa, ya, xb, yb)
+                        else:
+                            ek = (xb, yb, xa, ya)
+                        edge_planes_full[ek].append((pi, pa, pb))
+                okap_dir = self._compute_dominant_okap_direction(edge_planes_full, hull_edges)
             current, _, _ = self._classify_edge(p1, p2, centroids_for_edge, hull_edges, key,
-                                                 getattr(self, '_okap_dir', None), owners, all_ai)
+                                                 okap_dir, owners, all_ai)
+            if not current:
+                current = "internal"
 
         # Cycle order based on edge ownership
-        num_owners = len(owners)
         if num_owners <= 1:
             cycle = ["okap", "stit", "internal"]
         else:
-            cycle = ["hreben", "narozie", "uzlabie", "internal", "okap", "stit"]
+            cycle = ["hreben", "narozie", "uzlabie", "internal"]
 
         try:
             next_idx = (cycle.index(current) + 1) % len(cycle)
         except ValueError:
             next_idx = 0
         self._edge_class_overrides[key] = cycle[next_idx]
-        print(f"Edge {best_i}: {current} -> {cycle[next_idx]}")
+        print(f"Edge {best_i} (owners={num_owners}): {current} -> {cycle[next_idx]}")
 
         # Redraw
         self._update_outer_perimeter()
