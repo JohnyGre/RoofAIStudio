@@ -21,6 +21,7 @@ class MaterialPriceResult:
     total_area_m2: float
     total_price_eur: float
     currency: str = "EUR"
+    platnost_od: Optional[str] = None
 
 
 class RoofPricingService:
@@ -42,7 +43,8 @@ class RoofPricingService:
             .order_by(PriceItem.unit_price).all())
         return [{"supplier_id": s.id, "supplier_name": s.name,
                  "price_per_unit": pi.unit_price,
-                 "price_list_name": pl.name, "currency": pl.currency}
+                 "price_list_name": pl.name, "currency": pl.currency,
+                 "platnost_od": pi.platnost_od.strftime('%Y-%m-%d') if pi.platnost_od else None}
                 for pi, pl, s in items]
 
     def get_all_suppliers(self):
@@ -64,6 +66,14 @@ class RoofPricingService:
         waste_area = roof_area_m2 * material.waste_factor
         total_area = roof_area_m2 + waste_area
         total_price = unit_price * total_area
+        platnost_od_str = None
+        if supplier_id:
+            platnost_item = (self.session.query(PriceItem).join(PriceList)
+                    .where(PriceItem.material_id == material_id,
+                           PriceList.supplier_id == supplier_id).first())
+            if platnost_item and platnost_item.platnost_od:
+                platnost_od_str = platnost_item.platnost_od.strftime('%Y-%m-%d')
+
         return MaterialPriceResult(
             material_id=material.id, material_name=material.name,
             category_name=material.category.name if material.category else "",
@@ -73,4 +83,5 @@ class RoofPricingService:
             waste_area_m2=round(waste_area, 1),
             total_area_m2=round(total_area, 1),
             total_price_eur=round(total_price, 2),
+            platnost_od=platnost_od_str,
         )
