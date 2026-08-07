@@ -484,7 +484,6 @@ class MainWindow(QMainWindow):
             planes_xy.append([(p.x() / px_per_m, p.y() / px_per_m) for p in pts])
 
         # --- Compute per-vertex heights (v2: max across owning planes) ---
-        SLOPE_DEG = 25.0
         FIXED_HEIGHT = 2.5
         candidates = {}  # vkey -> set of heights
         coords = {}
@@ -500,13 +499,8 @@ class MainWindow(QMainWindow):
                 if on_perim[i]:
                     candidates.setdefault(k, set()).add(0.0)
                     continue
-                if eave_edges:
-                    d = min(dist_point_to_segment(v, a, b) for a, b in eave_edges)
-                else:
-                    d = min(math.hypot(v[0]-p[0], v[1]-p[1]) for p in perimeter_xy) if perimeter_xy else 5.0
-                # Fallback: if slope mode gives weird value (< 0.05m difference), use fixed
-                slope_h = d * math.tan(math.radians(SLOPE_DEG))
-                candidates.setdefault(k, set()).add(max(slope_h, FIXED_HEIGHT))
+                # Fixed ridge height for all interior (non-perimeter) vertices
+                candidates.setdefault(k, set()).add(FIXED_HEIGHT)
 
         # Final height = max candidate per unique vertex
         final_height = {k: max(vs) for k, vs in candidates.items()}
