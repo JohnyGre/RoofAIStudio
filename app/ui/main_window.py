@@ -129,7 +129,7 @@ class MainWindow(QMainWindow):
         self.menu_bar.new_project_triggered.connect(self._on_new_project)
         self.menu_bar.open_project_triggered.connect(self._on_open_project)
         self.menu_bar.save_project_triggered.connect(self._on_save_project)
-        self.menu_bar.export_pdf_triggered.connect(self._on_export_3d)
+        self.menu_bar.export_pdf_triggered.connect(self._on_export_pdf)
         self.menu_bar.exit_triggered.connect(self.close)
 
         # Project Menu
@@ -464,6 +464,47 @@ class MainWindow(QMainWindow):
         self._last_fetch_result = result
         self._last_address = address.strip()
 
+    def _on_export_pdf(self) -> None:
+        """Export PDF report with material cost."""
+        from app.exporters.pdf_exporter import PDFExporter
+        from app.exporters.pdf_models import CompanyInfo, CustomerReport
+        from pathlib import Path
+        if not hasattr(self, '_last_fetch_result') or not self._last_fetch_result:
+            QMessageBox.warning(self, "No Data", "Najprv nacitajte strechu cez Fetch.")
+            return
+        result = self._last_fetch_result
+        address = getattr(self, '_last_address', 'Strecha')
+        total_area = result.get("total_area_m2", 0)
+        total_perim = result.get("total_perimeter_m", 0)
+        pr = getattr(self, '_last_pricing_result', None)
+
+        report = CustomerReport(
+            customer_name="Zakaznik",
+            customer_address=address,
+            project_name="Analyza strechy",
+            project_address=address,
+            roof_summary=f"Celkova plocha: {total_area} m2, obvod: {total_perim} m",
+            roof_material_name=pr.material_name if pr else None,
+            roof_material_supplier=pr.supplier_name if pr else None,
+            roof_material_price_per_m2=pr.price_per_m2 if pr else None,
+            roof_material_total_price=pr.total_price_eur if pr else None,
+            roof_material_waste_pct=pr.waste_factor * 100 if pr else None,
+        )
+        company = CompanyInfo(
+            company_name="RoofAIStudio",
+            address="", phone="", email="",
+        )
+        out_dir = Path(__file__).resolve().parent.parent.parent / "data" / "exports"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        pdf_path = out_dir / "roof_report.pdf"
+        exporter = PDFExporter()
+        try:
+            exporter.generate_report(report, company, pdf_path)
+            self.status_bar.set_status_message(f"PDF export: {pdf_path}")
+            webbrowser.open(str(pdf_path))
+        except Exception as e:
+            QMessageBox.critical(self, "PDF Error", f"Chyba pri generovani PDF: {e}")
+
     def _on_export_3d(self) -> None:
         """Export roof data to JSON with per-vertex heights and open 3D viewer."""
         from app.visualization.roof_3d import Roof3DExporter
@@ -608,6 +649,9 @@ class MainWindow(QMainWindow):
         try:
             Roof3DExporter.export_to_html(str(json_path), str(html_path))
             webbrowser.open(str(html_path))
+            # Store pricing result for PDF
+            if hasattr(self.workspace, "materials_panel"):
+                self._last_pricing_result = getattr(self.workspace.materials_panel, "_last_result", None)
             self.status_bar.set_status_message(f"3D export hotovy: {address} -> {html_path}")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", "Failed to generate 3D: " + str(e))

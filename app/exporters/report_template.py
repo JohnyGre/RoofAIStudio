@@ -329,6 +329,26 @@ class ReportTemplate:
 
         # 9. Notes
         story.append(Paragraph("7. Notes", self.styles['Heading1']))
+        if report_data.roof_material_name and report_data.roof_material_total_price:
+            story.append(Paragraph("Odhadovana cena materialu", self.styles['Heading2']))
+            cost_data = [
+                ["Material:", report_data.roof_material_name or "Neuvedeny"],
+                ["Dodavatel:", report_data.roof_material_supplier or "Neuvedeny"],
+                ["Cena/m2:", f"{report_data.roof_material_price_per_m2:.2f} EUR" if report_data.roof_material_price_per_m2 else "N/A"],
+                ["Odpad:", f"{report_data.roof_material_waste_pct:.0f}%" if report_data.roof_material_waste_pct else "N/A"],
+                ["Celkova cena:", f"{report_data.roof_material_total_price:.2f} EUR" if report_data.roof_material_total_price else "N/A"],
+            ]
+            cost_table = Table(cost_data, colWidths=[2.5*inch, 4*inch])
+            cost_table.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('TEXTCOLOR', (0, 0), (0, -1), darkgrey),
+                ('LINEBELOW', (0, -1), (-1, -1), 1, black),
+            ]))
+            story.append(cost_table)
+            story.append(Spacer(1, 12))
+
         if report_data.notes:
             story.append(Paragraph(report_data.notes, self.styles['BodyText']))
         else:

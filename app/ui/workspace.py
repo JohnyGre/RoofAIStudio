@@ -48,11 +48,12 @@ class Workspace(QWidget):
         self.roof_canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         top_section_layout.addWidget(self.roof_canvas, 1) # Stretch factor 1 for canvas
 
-        # Right Panel (Placeholder for Properties)
-        self._right_panel = self._create_panel("Properties", "RightPanel")
-        self._right_panel.setMinimumWidth(200)
-        self._right_panel.setMaximumWidth(300)
-        top_section_layout.addWidget(self._right_panel)
+        # Right Panel - Materials & Pricing
+        from app.ui.materials_panel import MaterialsPanel
+        self.materials_panel = MaterialsPanel(self)
+        self.materials_panel.setMinimumWidth(220)
+        self.materials_panel.setMaximumWidth(320)
+        top_section_layout.addWidget(self.materials_panel)
 
         main_layout.addLayout(top_section_layout, 1) # Stretch factor 1 for top section
 

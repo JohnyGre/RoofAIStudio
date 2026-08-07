@@ -25,6 +25,7 @@ class MaterialManufacturer(Base, BaseModel):
     __tablename__ = "material_manufacturers"
 
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    website: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     contact_info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     materials: Mapped[List["Material"]] = relationship(back_populates="manufacturer", cascade="all, delete-orphan", lazy="joined")
@@ -39,6 +40,13 @@ class Material(Base, BaseModel):
     unit_of_measure: Mapped[MaterialUnit] = mapped_column(String(50), nullable=False)
     sku: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    # Roof-specific technical parameters
+    covering_width_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # krycia sirka (m)
+    covering_length_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # krycia dlzka (m)
+    min_slope_deg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # min. sklon strechy
+    weight_kg_per_m2: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # hmotnost kg/m2
+    waste_factor: Mapped[float] = mapped_column(Float, nullable=False, default=0.10)  # odpad 10%
 
     category_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("material_categories.id"), nullable=False, index=True

@@ -36,7 +36,11 @@ class Material:
     unit: DBMaterialUnit # Use the enum from the database layer
     price: float         # Price per unit
     coverage: Optional[float] = None # e.g., sq_ft per unit, or linear_ft per unit
-    waste_factor: float = 0.0 # e.g., 0.05 for 5% waste
+    waste_factor: float = 0.0 # e.g., 0.10 for 10% waste
+    covering_width_m: Optional[float] = None  # krycia sirka (m)
+    covering_length_m: Optional[float] = None  # krycia dlzka (m)
+    min_slope_deg: Optional[float] = None  # min. sklon strechy
+    weight_kg_per_m2: Optional[float] = None  # hmotnost kg/m2
     description: Optional[str] = None
     sku: Optional[str] = None
     is_active: bool = True

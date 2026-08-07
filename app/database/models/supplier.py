@@ -19,6 +19,7 @@ class Supplier(Base, BaseModel):
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     contact: Mapped[Optional[str]] = mapped_column(Text, nullable=True) # e.g., contact person, phone, email
     website: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    region: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # region posobenia
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     price_lists: Mapped[List["PriceList"]] = relationship(back_populates="supplier", cascade="all, delete-orphan")

@@ -112,7 +112,11 @@ class SQLAlchemyMaterialRepository(MaterialRepository):
             unit=DBMaterialUnit(orm_material.unit_of_measure),
             price=orm_material.unit_cost,
             coverage=None, # ORM model does not currently have coverage
-            waste_factor=0.0, # ORM model does not currently have waste_factor
+            waste_factor=orm_material.waste_factor,
+            covering_width_m=orm_material.covering_width_m,
+            covering_length_m=orm_material.covering_length_m,
+            min_slope_deg=orm_material.min_slope_deg,
+            weight_kg_per_m2=orm_material.weight_kg_per_m2,
             description=orm_material.description,
             sku=orm_material.sku,
             is_active=orm_material.is_active
@@ -130,6 +134,11 @@ class SQLAlchemyMaterialRepository(MaterialRepository):
         orm_material.description = material.description
         orm_material.sku = material.sku
         orm_material.is_active = material.is_active
+        orm_material.waste_factor = material.waste_factor
+        orm_material.covering_width_m = material.covering_width_m
+        orm_material.covering_length_m = material.covering_length_m
+        orm_material.min_slope_deg = material.min_slope_deg
+        orm_material.weight_kg_per_m2 = material.weight_kg_per_m2
 
         # Handle category
         orm_category = self.session.get(ORMMaterialCategory, material.category.id)

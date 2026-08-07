@@ -60,3 +60,10 @@ class CustomerReport:
     # Additional sections
     notes: Optional[str] = None
     signature_area_text: str = "Approved by:"
+
+    # Material cost estimate
+    roof_material_name: Optional[str] = None
+    roof_material_supplier: Optional[str] = None
+    roof_material_price_per_m2: Optional[float] = None
+    roof_material_total_price: Optional[float] = None
+    roof_material_waste_pct: Optional[float] = None

@@ -40,6 +40,11 @@ class MaterialUnit(str, Enum):
     BUNDLE = "bundle"
     GALLON = "gallon"
     POUND = "pound"
+    SQUARE_METER = "m2"
+    LINEAR_METER = "lm"
+    PIECE = "ks"
+    BUNDLE_M2 = "bal_m2"
+    KG = "kg"
 
 class PhotoType(str, Enum):
     """Defines the type or perspective of a roof photo."""
