@@ -47,6 +47,7 @@ class PriceItem(Base, BaseModel):
     )
     unit_price: Mapped[float] = mapped_column(Float, nullable=False)
     minimum_quantity: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    platnost_od: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
 
     material: Mapped["Material"] = relationship() # No back_populates needed if not listing price items from Material
     price_list: Mapped["PriceList"] = relationship(back_populates="price_items")
