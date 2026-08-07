@@ -373,6 +373,7 @@ class RoofCanvas(QGraphicsView):
         self._debounce_interval_ms = 100
         self._debounce_timer.timeout.connect(self._flush_debounced_moves)
         self._debounce_pending: dict = {}
+        self._edge_class_overrides: dict = {}  # edge_key -> label_sk
         # Color palette for planes
         self._ai_plane_colors = [QColor(0, 170, 0), QColor(0, 85, 170), QColor(170, 85, 0), QColor(170, 0, 170), QColor(85,170,85)]
         # Connect internal overlay move signal to handler
@@ -1196,6 +1197,14 @@ class RoofCanvas(QGraphicsView):
             p1, p2 = owners[0][1], owners[0][2]
             centroids = [plane_centroids[pi] for pi, _, _ in owners]
             label_sk, (r,g,b), width = self._classify_edge(p1, p2, centroids, hull_edges_set, key, okap_dir, owners, self._ai_planes)
+            # Apply user override if exists
+            override = self._edge_class_overrides.get(key)
+            if override:
+                label_sk = override
+                # Re-resolve color from override
+                color_map = {"okap": (0,240,255), "stit": (100,255,130), "hreben": (60,60,60),
+                             "narozie": (255,80,60), "uzlabie": (180,80,255), "internal": (255,200,50)}
+                r, g, b = color_map.get(override, (128,128,128))
             if not label_sk:
                 continue
             pen = QPen(QColor(r, g, b, 220), width)
@@ -1466,6 +1475,87 @@ class RoofCanvas(QGraphicsView):
             try: self.scene.removeItem(lb)
             except: pass
         self._ai_vertex_label_items.clear()
+        self._update_outer_perimeter()
+
+
+    def _reclassify_edge_at(self, pos: QPointF) -> None:
+        """Shift+click: find nearest edge of selected polygon and cycle its class."""
+        pts = self._current_ai_polygon_points
+        n = len(pts)
+        best_dist, best_i = float('inf'), -1
+        for i in range(n):
+            j = (i + 1) % n
+            p1, p2 = pts[i], pts[j]
+            dx, dy = p2.x() - p1.x(), p2.y() - p1.y()
+            L2 = dx*dx + dy*dy
+            if L2 < 1:
+                d = ((pos.x()-p1.x())**2 + (pos.y()-p1.y())**2)**0.5
+            else:
+                t = max(0.0, min(1.0, ((pos.x()-p1.x())*dx + (pos.y()-p1.y())*dy) / L2))
+                proj_x, proj_y = p1.x() + t*dx, p1.y() + t*dy
+                d = ((pos.x()-proj_x)**2 + (pos.y()-proj_y)**2)**0.5
+            if d < best_dist and d < 30:
+                best_dist, best_i = d, i
+
+        if best_i < 0:
+            return
+
+        # Build edge key
+        i, j = best_i, (best_i + 1) % n
+        p1, p2 = pts[i], pts[j]
+        x1, y1, x2, y2 = p1.x(), p1.y(), p2.x(), p2.y()
+        if x1 < x2 or (x1 == x2 and y1 < y2):
+            key = (x1, y1, x2, y2)
+        else:
+            key = (x2, y2, x1, y1)
+
+        # Cycle classification
+        # Determine current class from overrides or re-classify
+        current = self._edge_class_overrides.get(key)
+        if not current:
+            # Need to determine current class - re-run classification
+            from collections import defaultdict
+            edge_planes_test = defaultdict(list)
+            all_ai = self._ai_planes
+            centroids_test = {}
+            for pi, ap in enumerate(all_ai):
+                apts = ap.get("polygon_points", [])
+                if len(apts) < 3: continue
+                cx = sum(p.x() for p in apts) / len(apts)
+                cy = sum(p.y() for p in apts) / len(apts)
+                centroids_test[pi] = (cx, cy)
+                for vi in range(len(apts)):
+                    vj = (vi + 1) % len(apts)
+                    pa, pb = apts[vi], apts[vj]
+                    xa, ya = pa.x(), pa.y()
+                    xb, yb = pb.x(), pb.y()
+                    if xa < xb or (xa == xb and ya < yb):
+                        ek = (xa, ya, xb, yb)
+                    else:
+                        ek = (xb, yb, xa, ya)
+                    edge_planes_test[ek].append((pi, pa, pb))
+            owners = edge_planes_test.get(key, [])
+            centroids_for_edge = [centroids_test[pi] for pi, _, _ in owners]
+            all_pts = [(p.x(), p.y()) for ap in all_ai for p in ap.get("polygon_points", [])]
+            hull_edges = self._compute_convex_hull_edges(all_pts)
+            current, _, _ = self._classify_edge(p1, p2, centroids_for_edge, hull_edges, key,
+                                                 getattr(self, '_okap_dir', None), owners, all_ai)
+
+        # Cycle order based on edge ownership
+        num_owners = len(owners)
+        if num_owners <= 1:
+            cycle = ["okap", "stit", "internal"]
+        else:
+            cycle = ["hreben", "narozie", "uzlabie", "internal", "okap", "stit"]
+
+        try:
+            next_idx = (cycle.index(current) + 1) % len(cycle)
+        except ValueError:
+            next_idx = 0
+        self._edge_class_overrides[key] = cycle[next_idx]
+        print(f"Edge {best_i}: {current} -> {cycle[next_idx]}")
+
+        # Redraw
         self._update_outer_perimeter()
 
     def _delete_plane_quiet(self, idx: int) -> None:
@@ -1772,6 +1862,11 @@ class RoofCanvas(QGraphicsView):
                         hit_idx = idx
                         break
             if hit_idx >= 0:
+                # Edge reclassification: Shift+click near edge of selected polygon
+                if (event.modifiers() & Qt.KeyboardModifier.ShiftModifier and
+                    hit_idx == self._selected_ai_plane_index):
+                    self._reclassify_edge_at(scene_pos)
+                    return
                 # Split mode: click on boundary of selected polygon
                 if (getattr(self, '_split_mode', False) and
                     hit_idx == self._selected_ai_plane_index):
