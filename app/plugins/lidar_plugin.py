@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPu
 from PySide6.QtCore import Qt, QThread, Signal
 import webbrowser
 from app.plugins.viewer_generator import generate_viewer
+from app.plugins.roof_measure import analyze_roof_from_points
 
 # Project paths
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -295,6 +296,15 @@ class LidarWorker(QThread):
             'points': info['n'], 'files': {'ply': ply, 'obj': obj, 'orthophoto': jpg}
         }
 
+                # Analyze roof planes + edges + materials
+        try:
+            roof_data = analyze_roof_from_points(points, gz)
+            if roof_data:
+                result['roof'] = roof_data
+                result['materials'] = roof_data.get('materials', {})
+        except Exception as e:
+            self.log.emit('  Roof analysis: ' + str(e))
+
         # Generate 3D viewer with smoothing + dimensions
         viewer_html = os.path.join(OUT_DIR, safe + '_viewer.html')
         try:
@@ -357,7 +367,20 @@ class LidarDialog(QDialog):
         self.pb.setVisible(False)
         if ok and res:
             self.lg.append('\nDONE!')
+            dims = res.get('roof', {})
+            mats = res.get('materials', {})
             self.lg.append('{} | {}m | {}deg | {}'.format(res['footprint'], res['height_ridge'], res['pitch'], res['roof_type']))
+            if mats:
+                self.lg.append('')
+                self.lg.append('=== KALKULACIA MATERIALOV ===')
+                self.lg.append('Skridla (s 10% odpadom): {} m2'.format(mats.get('skridla_m2', '?')))
+                self.lg.append('Folia: {} m2'.format(mats.get('folia_m2', '?')))
+                self.lg.append('Okapovy plech: {} m'.format(mats.get('okapove_plechy_m', '?')))
+                self.lg.append('Zlab: {} m'.format(mats.get('zlab_m', '?')))
+                self.lg.append('Hrebenace: {} m'.format(mats.get('hrebenace_m', '?')))
+                mats_uzlabie = mats.get('uzlabie_m', 0)
+                if mats_uzlabie > 0:
+                    self.lg.append('Uzlabie: {} m'.format(mats_uzlabie))
             self.lg.append('Files: ' + res['files']['ply'])
             self.lg.append('       ' + res['files']['orthophoto'])
         else:
