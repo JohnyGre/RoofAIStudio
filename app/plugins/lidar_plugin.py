@@ -405,56 +405,59 @@ class LidarDialog(QDialog):
 
 
     def _topo(self):
-        """Run topographic analysis on LAZ files filtered to address location."""
+        """Run topographic analysis on existing PLY mesh (output folder)."""
         self.lg.clear()
-        self.lg.append('Topographic Analysis...')
+        self.lg.append('Topographic Analysis (PLY mesh)...')
         self.topo_btn.setEnabled(False)
         try:
-            import glob, laspy, numpy as np
-            from pyproj import Transformer
+            import glob, numpy as np
             
-            # Geocode address first
+            # Find PLY file in output folder
             addr = self.inp.text().strip()
-            if not addr:
-                self.lg.append('Enter address first.')
+            safe_prefix = '_'.join(addr.replace(',','').replace('/','_').split()[:3]) if addr else ''
+            safe_prefix = ''.join(c for c in safe_prefix if c.isalnum() or c in '_- ').strip().replace(' ', '_')
+            
+            ply_files = glob.glob(os.path.join(OUT_DIR, '*smooth.ply'))
+            if not ply_files:
+                ply_files = glob.glob(os.path.join(OUT_DIR, '*.ply'))
+                ply_files = [f for f in ply_files if 'viewer' not in f and '_topo' not in f]
+            
+            if not ply_files:
+                self.lg.append('No PLY mesh found. Run GO first to generate mesh.')
                 self.topo_btn.setEnabled(True)
                 return
-            lat, lon, display = self._geocode()
-            self.lg.append('Address: {} ({:.6f}, {:.6f})'.format(display, lat, lon))
             
-            # Filter LAZ points by building location
-            t = Transformer.from_crs('EPSG:4326', 'EPSG:8353', always_xy=True)
-            te, tn = t.transform(lon, lat)
-            laz_files = glob.glob(os.path.join(LAZ_DIR, '*.laz'))
-            laz_files = [f for f in laz_files if '.copc.' not in f]
-            if not laz_files:
-                self.lg.append('No LAZ files found. Run GO first.')
-                self.topo_btn.setEnabled(True)
-                return
-            self.lg.append('LAZ files: {}'.format(len(laz_files)))
+            # Use most recent PLY
+            ply_path = max(ply_files, key=os.path.getmtime)
+            self.lg.append('Mesh: {}'.format(os.path.basename(ply_path)))
             
-            # Load building + ground points within 60m radius
-            bp, gp = [], []
-            for f in laz_files:
-                las = laspy.read(f)
-                xs, ys, zs = np.array(las.x), np.array(las.y), np.array(las.z)
-                cls = np.array(las.classification, dtype=np.uint8)
-                d = np.sqrt((xs - te)**2 + (ys - tn)**2)
-                n = d < 60
-                bm = n & (cls == 6); gm = n & (cls == 2)
-                if np.any(bm): bp.append(np.column_stack([xs[bm], ys[bm], zs[bm]]))
-                if np.any(gm): gp.append(np.column_stack([xs[gm], ys[gm], zs[gm]]))
+            # Parse PLY vertices
+            verts = []
+            with open(ply_path, 'r') as f:
+                lines = f.readlines()
+            n_verts = 0
+            header_end = 0
+            for i, l in enumerate(lines):
+                if l.startswith('element vertex '):
+                    n_verts = int(l.split()[-1])
+                if 'end_header' in l:
+                    header_end = i + 1
+                    break
+            for i in range(header_end, header_end + n_verts):
+                parts = lines[i].strip().split()
+                if len(parts) >= 3:
+                    verts.append([float(parts[0]), float(parts[1]), float(parts[2])])
             
-            if not bp:
-                self.lg.append('No building points near address.')
-                self.topo_btn.setEnabled(True)
-                return
-            bp = np.vstack(bp); gp = np.vstack(gp) if gp else np.array([[0,0,0]])
-            gz = float(np.median(gp[:,2]) if len(gp) > 10 else bp[:,2].min() - 10)
-            self.lg.append('Building pts: {}  Ground: {}  GZ: {:.2f}'.format(len(bp), len(gp), gz))
+            pts = np.array(verts)
+            self.lg.append('Vertices: {}  XY: {:.1f}x{:.1f}m  Z: {:.1f}-{:.1f}m'.format(
+                len(pts), pts[:,0].max()-pts[:,0].min(), pts[:,1].max()-pts[:,1].min(),
+                pts[:,2].min(), pts[:,2].max()))
             
-            # Run analysis
-            result = topographic_roof_analysis(bp, gz)
+            # Ground Z is min Z (PLY is relative)
+            gz = float(pts[:,2].min())
+            
+            # Run topographic analysis
+            result = topographic_roof_analysis(pts, gz)
             self.lg.append('Planes: {}  Slices: {}  Ridges: {}'.format(len(result['planes']), result['n_slices'], result['ridge_count']))
             
             # Summary
@@ -467,9 +470,8 @@ class LidarDialog(QDialog):
                     self.lg.append('{}: {} hran, {:.2f} m'.format(names.get(ek,ek), e['pocet'], e['celkom_m']))
             
             # Generate viewer
-            safe = '_'.join(self.inp.text().strip().replace(',','').replace('/','_').split()[:3]) if self.inp.text().strip() else 'topographic'
-            safe = ''.join(c for c in safe if c.isalnum() or c in '_- ').strip().replace(' ', '_')
-            json_path = os.path.join(OUT_DIR, safe + '_topo.json')
+            safe = os.path.splitext(os.path.basename(ply_path))[0] + '_topo'
+            json_path = os.path.join(OUT_DIR, safe + '.json')
             with open(json_path, 'w', encoding='utf-8') as jf:
                 json.dump(result, jf, indent=2, ensure_ascii=False, default=str)
             
@@ -477,12 +479,12 @@ class LidarDialog(QDialog):
             jpg = glob.glob(os.path.join(OUT_DIR, '*ortofoto*.jpg'))
             jpg_path = jpg[0] if jpg else None
             
-            gv_path = os.path.join(OUT_DIR, safe + '_topo_viewer.html')
+            gv_path = os.path.join(OUT_DIR, safe + '_viewer.html')
             generate_geometry_viewer(json_path, jpg_path, gv_path)
             url = 'file:///' + gv_path.replace(chr(92), '/')
             webbrowser.open(url)
             self.lg.append('')
-            self.lg.append('Opened: ' + gv_path)
+            self.lg.append('Opened: ' + os.path.basename(gv_path))
         except Exception as e:
             import traceback
             self.lg.append('ERROR: ' + str(e))
