@@ -218,7 +218,7 @@ def topographic_roof_analysis(lidar_pts_xyz, ground_z, dz_slice=0.5, delta_z=0.5
         elen = float(np.linalg.norm(v2-v1))
         if elen < 0.3: continue
         nid = etypes['o']; etypes['o'] += 1
-        eave_edges.append({'id':'o{}'.format(nid+1),'type':'o','length_m':round(elen,3),'v1':ei,'v2':(ei+1)%len(eave_verts_3d)})
+        eave_edges.append({'id':'o{}'.format(nid+1),'type':'o','length_m':round(elen,3),'v1':ei,'v2':(ei+1)%len(eave_verts_3d),'start':eave_verts_3d[ei],'end':eave_verts_3d[(ei+1)%len(eave_verts_3d)]})
         esums.setdefault('o',[]).append(round(elen,3))
     
     try:
@@ -243,7 +243,7 @@ def topographic_roof_analysis(lidar_pts_xyz, ground_z, dz_slice=0.5, delta_z=0.5
             'area_m2':0,'pitch_deg':0.0,
             'z_min_m':round(float(rl['start'][2]),2),'z_max_m':round(float(rl['end'][2]),2),
             'vertices_3d':[rl['start'], rl['end']],
-            'edges':[{'id':'h{}'.format(nid+1),'type':'h','length_m':rlen,'v1':0,'v2':1}],
+            'edges':[{'id':'h{}'.format(nid+1),'type':'h','length_m':rlen,'v1':0,'v2':1,'start':rl['start'],'end':rl['end']}],
         })
         esums.setdefault('h',[]).append(rlen)
     
@@ -257,7 +257,7 @@ def topographic_roof_analysis(lidar_pts_xyz, ground_z, dz_slice=0.5, delta_z=0.5
             'z_min_m':round(float(vr['vertices_3d'][0][2]),2),
             'z_max_m':round(float(vr['vertices_3d'][-1][2]),2),
             'vertices_3d':vr['vertices_3d'],
-            'edges':[{'id':'{}{}'.format(ett,nid+1),'type':ett,'length_m':vr['len_3d'],'v1':0,'v2':len(vr['vertices_3d'])-1}],
+            'edges':[{'id':'{}{}'.format(ett,nid+1),'type':ett,'length_m':vr['len_3d'],'v1':0,'v2':len(vr['vertices_3d'])-1,'start':vr['vertices_3d'][0],'end':vr['vertices_3d'][-1]}],
         })
         esums.setdefault(ett,[]).append(vr['len_3d'])
     
