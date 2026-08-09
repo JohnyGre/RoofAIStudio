@@ -8,6 +8,7 @@ from scipy.spatial import Delaunay
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QTextEdit, QProgressBar, QGroupBox)
 from PySide6.QtCore import Qt, QThread, Signal
 import webbrowser
+from app.plugins.viewer_generator import generate_viewer
 
 # Project paths
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -284,7 +285,7 @@ class LidarWorker(QThread):
             jpg = os.path.join(OUT_DIR, safe + '_ortofoto.jpg')
             open(jpg, 'wb').write(r.read())
 
-        return {
+        result = {
             'address': display, 'gps': {'lat': info['lat'], 'lon': info['lon']},
             'footprint': '{:.1f} x {:.1f} m'.format(xd, yd),
             'height_ridge': round(float(zmx), 2), 'height_eave': round(float(ez), 2),
@@ -294,7 +295,22 @@ class LidarWorker(QThread):
             'points': info['n'], 'files': {'ply': ply, 'obj': obj, 'orthophoto': jpg}
         }
 
-
+        # Generate 3D viewer with smoothing + dimensions
+        viewer_html = os.path.join(OUT_DIR, safe + '_viewer.html')
+        try:
+            viewer_result = generate_viewer(ply, obj, jpg, result, viewer_html)
+            if viewer_result:
+                result['files']['viewer'] = viewer_result['viewer_html']
+                result['files']['smooth_ply'] = viewer_result['smooth_ply']
+                result['files']['smooth_obj'] = viewer_result['smooth_obj']
+                result['dimensions'] = viewer_result['dimensions']
+                # Auto-open viewer in browser
+                url = 'file:///' + viewer_html.replace(chr(92), '/')
+                webbrowser.open(url)
+        except Exception as e:
+            self.log.emit('  Viewer: ' + str(e))
+        
+        return result
 class LidarDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
