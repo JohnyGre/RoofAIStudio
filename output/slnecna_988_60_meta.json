@@ -1,0 +1,18 @@
+{
+  "address": "Slnecna 988/60, 917 01 Trnava",
+  "gps": {
+    "lat": 48.3932477,
+    "lon": 17.5905565
+  },
+  "dimensions_m": {
+    "length": 24.3,
+    "width": 24.3
+  },
+  "height_above_ground_m": 11.11,
+  "eave_height_m": 2.8,
+  "roof_pitch_deg": 34.4,
+  "roof_type": "sikma",
+  "area_m2": 230.0,
+  "point_count": 15529,
+  "ground_mnm": 153.21
+}

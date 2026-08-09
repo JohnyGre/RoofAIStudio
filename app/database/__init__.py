@@ -16,6 +16,7 @@ from .models.supplier import Supplier
 from .models.price_list import PriceList, PriceItem
 from .models.price_history import PriceHistory
 from .models.labor import LaborPrice
+from .models.accessory import RoofAccessory, AccessoryCategory
 from .models.roof_knowledge import RoofType, RoofTopology, RoofGeometryRules, RoofFeature # Updated import
 from .models.roof_genome_data import RoofGenome # New import for the actual genome data
 from .database import db_manager

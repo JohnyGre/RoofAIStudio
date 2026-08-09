@@ -1,0 +1,16 @@
+{
+  "source": "ZBGIS LLS .LAZ",
+  "date": "2026-08-08",
+  "gps_lat": 48.3922323,
+  "gps_lon": 17.5900438,
+  "footprint_oriented_m": {
+    "length": 8.3,
+    "width": 19.58
+  },
+  "height_above_ground_m": 5.08,
+  "eave_height_m": 0.42,
+  "roof_pitch_deg": 25.5,
+  "area_m2": 69.0,
+  "point_count": 4365,
+  "ground_elevation_mnm": 155.11
+}

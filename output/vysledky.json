@@ -1,0 +1,27 @@
+{
+  "address": "Átriová 16 (5937/16 + 7960/16M), 917 01 Trnava",
+  "gps": {"lat": 48.3952363, "lon": 17.5854374, "epsg": 4326},
+  "date": "2026-08-08",
+  "results": {
+    "dmr_5_0_mnm": 154.44,
+    "dmr_source": "ZBGIS WMS GetFeatureInfo, layer=1 (DMR 5.0), 1m resolution",
+    "dmr_wms_url": "https://zbgisws.skgeodesy.sk/zbgis_dmr_wms/service.svc/get",
+    "open_meteo_mnm": 155,
+    "open_elevation_mnm": 152,
+    "copernicus_dsm_mnm": 156.14,
+    "copernicus_ground_mnm": 153.27,
+    "copernicus_estimated_building_height_m": 2.9,
+    "copernicus_warning": "30m resolution — cannot accurately measure individual buildings",
+    "building_height_status": "UNAVAILABLE_WITHOUT_DMP",
+    "dmp_status": "Not accessible via WMS/WCS — requires MAPKA (WebGL2) or cloud ZIP download",
+    "osm_building_type": "yes (unclassified)",
+    "osm_building_levels": null,
+    "osm_area_type": "Mixed residential — family houses + unspecified buildings + one office"
+  },
+  "next_steps": [
+    "Download DMP 1.0 tile via MAPKA (zbgis.skgeodesy.sk/mapka/)",
+    "Run: python tools/lidar_height.py ndsm --dmp DMP_1_0.tif --dmr DMR_5_0.tif -o ndsm.tif",
+    "Run: python tools/lidar_height.py sample --ndsm ndsm.tif --lat 48.3952363 --lon 17.5854374",
+    "Alternatively: Download .LAZ point cloud and measure in CloudCompare"
+  ]
+}

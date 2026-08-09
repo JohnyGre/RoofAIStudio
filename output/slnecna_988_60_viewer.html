@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Slnecna 988/60, 917 01 Trnava</title>
+<style>body{margin:0;background:#111;color:#eee;font-family:sans-serif}#i{position:absolute;top:16px;left:16px;background:rgba(0,0,0,.85);padding:14px;border-radius:8px;max-width:300px}h1{margin:0 0 8px;font-size:15px}.s{display:inline-block;margin:2px 6px 2px 0;background:#222;padding:4px 10px;border-radius:4px}.sl{font-size:11px;color:#888}.sv{font-size:14px;font-weight:bold}</style></head><body>
+<div id="i"><h1>Slnecna 988/60, 917 01 Trnava</h1>
+<div class="s"><div class="sl">GPS</div><div class="sv">48.393248N,17.590557E</div></div>
+<div class="s"><div class="sl">Pôdorys</div><div class="sv">24.3x24.3m</div></div>
+<div class="s"><div class="sl">Výška</div><div class="sv">11.1m</div></div>
+<div class="s"><div class="sl">Sklon</div><div class="sv">34.4°</div></div>
+<div class="s"><div class="sl">Plocha</div><div class="sv">230m2</div></div>
+<div class="s"><div class="sl">Bodov</div><div class="sv">15,529</div></div>
+<div class="s"><div class="sl">Terén</div><div class="sv">153.2m n.m.</div></div>
+<p style="font-size:10px;color:#555;margin-top:8px">ZBGIS LLS .LAZ 2022-11-11 | LiDAR class=6</p></div>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js"}}</script>
+<script type="module">
+import*as T from'three';import{OrbitControls}from'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+const S=new T.Scene();S.background=new T.Color(0x111122);
+const C=new T.PerspectiveCamera(50,innerWidth/innerHeight,.1,1000);
+const R=new T.WebGLRenderer({antialias:true});R.setSize(innerWidth,innerHeight);document.body.appendChild(R.domElement);
+const O=new OrbitControls(C,R.domElement);O.enableDamping=true;
+S.add(new T.GridHelper(50,25,0x333355,0x222244));
+const G=new T.Mesh(new T.PlaneGeometry(50,50),new T.MeshStandardMaterial({color:0x222233}));
+G.rotation.x=-Math.PI/2;G.position.y=-.01;S.add(G);
+S.add(new T.AmbientLight(0xffffff,.5));
+const D=new T.DirectionalLight(0xffffff,.8);D.position.set(10,20,10);S.add(D);
+fetch('slnecna_988_60.ply').then(r=>r.text()).then(t=>{
+const l=t.trim().split('
+');let vc=0,fc=0,vs=0;
+for(let i=0;i<l.length;i++){if(l[i].includes('element vertex'))vc=+l[i].split(' ')[2];if(l[i].includes('element face'))fc=+l[i].split(' ')[2];if(l[i]==='end_header'){vs=i+1;break;}}
+const g=new T.BufferGeometry();const v=new Float32Array(vc*3);
+for(let i=0;i<vc;i++){const p=l[vs+i].split(' ').map(Number);v[i*3]=p[0];v[i*3+1]=p[2];v[i*3+2]=p[1];}
+g.setAttribute('position',new T.BufferAttribute(v,3));
+const idx=[];for(let i=0;i<fc;i++){const p=l[vs+vc+i].split(' ').map(Number);idx.push(p[1],p[2],p[3]);}
+g.setIndex(idx);g.computeVertexNormals();
+const m=new T.Mesh(g,new T.MeshStandardMaterial({color:0xcc6633,side:T.DoubleSide}));S.add(m);
+const pg=new T.BufferGeometry();pg.setAttribute('position',new T.BufferAttribute(v,3));
+S.add(new T.Points(pg,new T.PointsMaterial({color:0x00ff00,size:.10})));
+const bb=new T.Box3().setFromObject(m);const bc=bb.getCenter(new T.Vector3());const bs=bb.getSize(new T.Vector3());
+C.position.set(bc.x+bs.x,bc.y+bs.y*1.2,bc.z+bs.z*1.2);O.target.copy(bc);O.update();
+});
+(function a(){requestAnimationFrame(a);O.update();R.render(S,C);})();
+addEventListener('resize',()=>{C.aspect=innerWidth/innerHeight;C.updateProjectionMatrix();R.setSize(innerWidth,innerHeight);});
+</script></body></html>
