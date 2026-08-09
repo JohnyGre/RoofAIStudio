@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Strecha - 7960/16M, Átriová, Kopánka, Trnava, okres Trnava, Trnavský kraj, 917 01, Slovensko</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a1a2e;font-family:system-ui,sans-serif;overflow:hidden}
+#container{width:100vw;height:100vh}
+#panel{position:absolute;top:15px;right:15px;background:rgba(0,0,0,0.85);color:#ddd;padding:14px 18px;border-radius:10px;font-size:12px;min-width:200px;backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.1);z-index:10;max-height:80vh;overflow-y:auto}
+#panel h2{font-size:14px;color:#4fc3f7;margin-bottom:8px}
+#panel .dim{display:flex;justify-content:space-between;padding:2px 0}
+#panel .lbl{color:#999}#panel .val{color:#fff;font-weight:600}
+#panel hr{border-color:rgba(255,255,255,0.08);margin:6px 0}
+.etype{margin:4px 0 2px;font-weight:700;font-size:11px}
+.edges{display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px}
+.edge{font-size:10px;padding:2px 6px;border-radius:3px;background:rgba(255,255,255,0.08);cursor:pointer;transition:all 0.2s}
+.edge:hover{background:rgba(255,255,255,0.2);transform:scale(1.05)}
+.edge-o{border-left:2px solid #ff4444}.edge-h{border-left:2px solid #4488ff}
+.edge-n{border-left:2px solid #44ff44}.edge-u{border-left:2px solid #ffaa00}
+.edge-f{border-left:2px solid #888888}.edge-p{border-left:2px solid #aa44ff}
+#hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,0.3);font-size:11px}
+#ortho{position:absolute;bottom:15px;left:15px;width:180px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.2);z-index:10}
+#ortho img{width:100%;display:block}
+#legend{position:absolute;bottom:15px;right:15px;font-size:10px;color:rgba(255,255,255,0.4);text-align:right;z-index:10}
+</style></head>
+<body>
+<div id="container"></div>
+<div id="panel">
+<h2>7960/16M, Átriová, Kopánka, Trnava, okres Trnava, Trnavský kraj, 917 01, Slovensko</h2>
+<div class="dim"><span class="lbl">Odkvap</span><span class="val">71.2 m</span></div><div class="dim"><span class="lbl">Hreben</span><span class="val">35.7 m</span></div><div class="dim"><span class="lbl">Stit</span><span class="val">367.4 m</span></div><div class="dim"><span class="lbl">Plosina</span><span class="val">52.8 m</span></div></div>
+<div id="hint">LMB=otocenie | Pravy=posun | Koliesko=zoom | Klikni na hranu</div>
+<div id="ortho"><img src="data:image/jpeg;base64,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" /></div><div id="legend"><span style="color:#ff4444">&#x25A0;</span> Odkvap &nbsp; <span style="color:#4488ff">&#x25A0;</span> Hreben &nbsp; <span style="color:#44ff44">&#x25A0;</span> Narozie &nbsp; <span style="color:#ffaa00">&#x25A0;</span> Uzlabie &nbsp; <span style="color:#888888">&#x25A0;</span> Stit &nbsp; </div>
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+
+const container = document.getElementById("container");
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a2e);
+
+const camera = new THREE.PerspectiveCamera(50, container.clientWidth/container.clientHeight, 0.5, 200);
+camera.position.set(30, 25, 20);
+camera.lookAt(0, 0, 3);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+container.appendChild(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(container.clientWidth, container.clientHeight);
+labelRenderer.domElement.style.position = 'absolute';
+labelRenderer.domElement.style.top = '0';
+labelRenderer.domElement.style.pointerEvents = 'none';
+container.appendChild(labelRenderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 3);
+controls.enableDamping = true;
+controls.update();
+
+// Lighting
+scene.add(new THREE.AmbientLight(0x404070, 2));
+const sun = new THREE.DirectionalLight(0xffffff, 3);
+sun.position.set(30, 40, 20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+scene.add(sun);
+
+// Grid
+const grid = new THREE.GridHelper(60, 30, 0x333355, 0x1a1a3e);
+scene.add(grid);
+
+// PLANES DATA
+const planes = [{"id": "R1", "type": "valbova", "area_m2": 202.44, "pitch_deg": 5.9, "vertices": [[7.988, -9.488, 3.904], [6.022, 6.14, 5.483], [3.7, 8.033, 5.654], [1.153, 5.571, 5.377], [-0.485, 3.781, 5.178], [-5.154, -6.675, 4.063], [-2.41, -10.923, 3.655], [1.354, -15.331, 3.241]], "edges": [{"id": "f1", "type": "f", "length_m": 15.83, "start": [7.988, -9.488, 3.904], "end": [6.022, 6.14, 5.483]}, {"id": "h1", "type": "h", "length_m": 3.001, "start": [6.022, 6.14, 5.483], "end": [3.7, 8.033, 5.654]}, {"id": "h2", "type": "h", "length_m": 3.553, "start": [3.7, 8.033, 5.654], "end": [1.153, 5.571, 5.377]}, {"id": "h3", "type": "h", "length_m": 2.434, "start": [1.153, 5.571, 5.377], "end": [-0.485, 3.781, 5.178]}, {"id": "f2", "type": "f", "length_m": 11.505, "start": [-0.485, 3.781, 5.178], "end": [-5.154, -6.675, 4.063]}, {"id": "f3", "type": "f", "length_m": 5.074, "start": [-5.154, -6.675, 4.063], "end": [-2.41, -10.923, 3.655]}, {"id": "f4", "type": "f", "length_m": 5.811, "start": [-2.41, -10.923, 3.655], "end": [1.354, -15.331, 3.241]}, {"id": "f5", "type": "f", "length_m": 8.865, "start": [1.354, -15.331, 3.241], "end": [7.988, -9.488, 3.904]}]}, {"id": "R2", "type": "valbova", "area_m2": 190.94, "pitch_deg": 6.2, "vertices": [[4.699, 2.076, 4.912], [4.6, 13.025, 3.714], [4.081, 13.598, 3.651], [-8.53, 8.508, 4.194], [-3.611, -2.629, 5.417], [-1.612, -5.484, 5.731], [0.538, -7.697, 5.976], [1.848, -8.755, 6.093]], "edges": [{"id": "f6", "type": "f", "length_m": 11.015, "start": [4.699, 2.076, 4.912], "end": [4.6, 13.025, 3.714]}, {"id": "o1", "type": "o", "length_m": 0.776, "start": [4.6, 13.025, 3.714], "end": [4.081, 13.598, 3.651]}, {"id": "f7", "type": "f", "length_m": 13.61, "start": [4.081, 13.598, 3.651], "end": [-8.53, 8.508, 4.194]}, {"id": "f8", "type": "f", "length_m": 12.236, "start": [-8.53, 8.508, 4.194], "end": [-3.611, -2.629, 5.417]}, {"id": "f9", "type": "f", "length_m": 3.499, "start": [-3.611, -2.629, 5.417], "end": [-1.612, -5.484, 5.731]}, {"id": "h4", "type": "h", "length_m": 3.095, "start": [-1.612, -5.484, 5.731], "end": [0.538, -7.697, 5.976]}, {"id": "h5", "type": "h", "length_m": 1.688, "start": [0.538, -7.697, 5.976], "end": [1.848, -8.755, 6.093]}, {"id": "f10", "type": "f", "length_m": 11.262, "start": [1.848, -8.755, 6.093], "end": [4.699, 2.076, 4.912]}]}, {"id": "R3", "type": "valbova", "area_m2": 195.89, "pitch_deg": 8.5, "vertices": [[7.653, -9.598, 3.747], [6.825, 4.114, 5.724], [6.705, 4.271, 5.743], [3.687, 6.849, 6.031], [-0.974, 3.324, 5.381], [-1.691, 2.553, 5.247], [-7.067, -4.357, 4.082], [-7.066, -4.601, 4.046]], "edges": [{"id": "f11", "type": "f", "length_m": 13.879, "start": [7.653, -9.598, 3.747], "end": [6.825, 4.114, 5.724]}, {"id": "h6", "type": "h", "length_m": 0.199, "start": [6.825, 4.114, 5.724], "end": [6.705, 4.271, 5.743]}, {"id": "h7", "type": "h", "length_m": 3.98, "start": [6.705, 4.271, 5.743], "end": [3.687, 6.849, 6.031]}, {"id": "f12", "type": "f", "length_m": 5.88, "start": [3.687, 6.849, 6.031], "end": [-0.974, 3.324, 5.381]}, {"id": "o2", "type": "o", "length_m": 1.061, "start": [-0.974, 3.324, 5.381], "end": [-1.691, 2.553, 5.247]}, {"id": "f13", "type": "f", "length_m": 8.832, "start": [-1.691, 2.553, 5.247], "end": [-7.067, -4.357, 4.082]}, {"id": "o3", "type": "o", "length_m": 0.247, "start": [-7.067, -4.357, 4.082], "end": [-7.066, -4.601, 4.046]}, {"id": "o4", "type": "o", "length_m": 15.547, "start": [-7.066, -4.601, 4.046], "end": [7.653, -9.598, 3.747]}]}, {"id": "R4", "type": "valbova", "area_m2": 92.71, "pitch_deg": 11.5, "vertices": [[-7.474, 3.057, 5.931], [-4.657, -3.322, 6.374], [-0.288, -5.187, 5.968], [-0.062, -5.221, 5.938], [2.566, 12.369, 3.147], [1.057, 11.103, 3.547], [-0.076, 10.075, 3.858]], "edges": [{"id": "f14", "type": "f", "length_m": 6.987, "start": [-7.474, 3.057, 5.931], "end": [-4.657, -3.322, 6.374]}, {"id": "f15", "type": "f", "length_m": 4.768, "start": [-4.657, -3.322, 6.374], "end": [-0.288, -5.187, 5.968]}, {"id": "h8", "type": "h", "length_m": 0.231, "start": [-0.288, -5.187, 5.968], "end": [-0.062, -5.221, 5.938]}, {"id": "f16", "type": "f", "length_m": 18.003, "start": [-0.062, -5.221, 5.938], "end": [2.566, 12.369, 3.147]}, {"id": "f17", "type": "f", "length_m": 2.01, "start": [2.566, 12.369, 3.147], "end": [1.057, 11.103, 3.547]}, {"id": "f18", "type": "f", "length_m": 1.561, "start": [1.057, 11.103, 3.547], "end": [-0.076, 10.075, 3.858]}, {"id": "f19", "type": "f", "length_m": 10.406, "start": [-0.076, 10.075, 3.858], "end": [-7.474, 3.057, 5.931]}]}, {"id": "R5", "type": "valbova", "area_m2": 54.12, "pitch_deg": 14.3, "vertices": [[3.485, 5.667, 6.154], [0.647, 3.831, 5.625], [8.595, -8.748, 2.62], [9.241, -8.178, 2.779], [10.098, -5.975, 3.356], [5.552, 4.19, 5.827], [5.301, 4.398, 5.874], [3.895, 5.496, 6.12]], "edges": [{"id": "f20", "type": "f", "length_m": 3.421, "start": [3.485, 5.667, 6.154], "end": [0.647, 3.831, 5.625]}, {"id": "f21", "type": "f", "length_m": 15.18, "start": [0.647, 3.831, 5.625], "end": [8.595, -8.748, 2.62]}, {"id": "o5", "type": "o", "length_m": 0.876, "start": [8.595, -8.748, 2.62], "end": [9.241, -8.178, 2.779]}, {"id": "f22", "type": "f", "length_m": 2.433, "start": [9.241, -8.178, 2.779], "end": [10.098, -5.975, 3.356]}, {"id": "f23", "type": "f", "length_m": 11.406, "start": [10.098, -5.975, 3.356], "end": [5.552, 4.19, 5.827]}, {"id": "h9", "type": "h", "length_m": 0.329, "start": [5.552, 4.19, 5.827], "end": [5.301, 4.398, 5.874]}, {"id": "h10", "type": "h", "length_m": 1.801, "start": [5.301, 4.398, 5.874], "end": [3.895, 5.496, 6.12]}, {"id": "h11", "type": "h", "length_m": 0.446, "start": [3.895, 5.496, 6.12], "end": [3.485, 5.667, 6.154]}]}, {"id": "R6", "type": "sedlova", "area_m2": 153.96, "pitch_deg": 18.4, "vertices": [[-0.391, -6.428, 6.659], [10.753, -5.609, 3.422], [10.963, -5.358, 3.317], [10.71, -4.92, 3.306], [0.301, 10.427, 3.343], [-0.221, 10.076, 3.552], [-0.754, 9.551, 3.797], [-0.94, 9.367, 3.883]], "edges": [{"id": "f24", "type": "f", "length_m": 11.633, "start": [-0.391, -6.428, 6.659], "end": [10.753, -5.609, 3.422]}, {"id": "o6", "type": "o", "length_m": 0.344, "start": [10.753, -5.609, 3.422], "end": [10.963, -5.358, 3.317]}, {"id": "o7", "type": "o", "length_m": 0.506, "start": [10.963, -5.358, 3.317], "end": [10.71, -4.92, 3.306]}, {"id": "o8", "type": "o", "length_m": 18.544, "start": [10.71, -4.92, 3.306], "end": [0.301, 10.427, 3.343]}, {"id": "o9", "type": "o", "length_m": 0.663, "start": [0.301, 10.427, 3.343], "end": [-0.221, 10.076, 3.552]}, {"id": "o10", "type": "o", "length_m": 0.787, "start": [-0.221, 10.076, 3.552], "end": [-0.754, 9.551, 3.797]}, {"id": "o11", "type": "o", "length_m": 0.275, "start": [-0.754, 9.551, 3.797], "end": [-0.94, 9.367, 3.883]}, {"id": "f25", "type": "f", "length_m": 16.046, "start": [-0.94, 9.367, 3.883], "end": [-0.391, -6.428, 6.659]}]}, {"id": "R7", "type": "sedlova", "area_m2": 137.74, "pitch_deg": 24.0, "vertices": [[3.267, 4.557, 5.91], [-11.541, 6.538, 3.93], [-11.991, 6.49, 3.826], [-12.381, 6.275, 3.666], [-13.731, 5.194, 2.975], [8.358, -5.444, 2.822], [10.159, -6.043, 2.918], [10.631, -5.885, 3.07]], "edges": [{"id": "f26", "type": "f", "length_m": 15.071, "start": [3.267, 4.557, 5.91], "end": [-11.541, 6.538, 3.93]}, {"id": "o12", "type": "o", "length_m": 0.464, "start": [-11.541, 6.538, 3.93], "end": [-11.991, 6.49, 3.826]}, {"id": "o13", "type": "o", "length_m": 0.473, "start": [-11.991, 6.49, 3.826], "end": [-12.381, 6.275, 3.666]}, {"id": "f27", "type": "f", "length_m": 1.862, "start": [-12.381, 6.275, 3.666], "end": [-13.731, 5.194, 2.975]}, {"id": "o14", "type": "o", "length_m": 24.518, "start": [-13.731, 5.194, 2.975], "end": [8.358, -5.444, 2.822]}, {"id": "o15", "type": "o", "length_m": 1.9, "start": [8.358, -5.444, 2.822], "end": [10.159, -6.043, 2.918]}, {"id": "o16", "type": "o", "length_m": 0.52, "start": [10.159, -6.043, 2.918], "end": [10.631, -5.885, 3.07]}, {"id": "f28", "type": "f", "length_m": 13.089, "start": [10.631, -5.885, 3.07], "end": [3.267, 4.557, 5.91]}]}, {"id": "R8", "type": "valbova", "area_m2": 87.4, "pitch_deg": 10.9, "vertices": [[-11.511, 6.607, 3.729], [0.702, -0.369, 5.769], [1.602, -0.088, 5.773], [3.078, 1.002, 5.666], [3.765, 1.861, 5.552], [-0.953, 8.282, 4.082], [-7.076, 10.246, 3.34], [-7.437, 10.087, 3.346]], "edges": [{"id": "f29", "type": "f", "length_m": 14.212, "start": [-11.511, 6.607, 3.729], "end": [0.702, -0.369, 5.769]}, {"id": "h12", "type": "h", "length_m": 0.943, "start": [0.702, -0.369, 5.769], "end": [1.602, -0.088, 5.773]}, {"id": "h13", "type": "h", "length_m": 1.838, "start": [1.602, -0.088, 5.773], "end": [3.078, 1.002, 5.666]}, {"id": "h14", "type": "h", "length_m": 1.106, "start": [3.078, 1.002, 5.666], "end": [3.765, 1.861, 5.552]}, {"id": "f30", "type": "f", "length_m": 8.102, "start": [3.765, 1.861, 5.552], "end": [-0.953, 8.282, 4.082]}, {"id": "f31", "type": "f", "length_m": 6.473, "start": [-0.953, 8.282, 4.082], "end": [-7.076, 10.246, 3.34]}, {"id": "o17", "type": "o", "length_m": 0.395, "start": [-7.076, 10.246, 3.34], "end": [-7.437, 10.087, 3.346]}, {"id": "f32", "type": "f", "length_m": 5.372, "start": [-7.437, 10.087, 3.346], "end": [-11.511, 6.607, 3.729]}]}, {"id": "R9", "type": "sedlova", "area_m2": 84.24, "pitch_deg": 17.3, "vertices": [[10.195, -4.171, 2.719], [10.213, -3.745, 2.794], [9.341, -2.614, 3.222], [3.498, 4.914, 6.085], [1.831, 4.442, 6.415], [0.997, 3.873, 6.518], [-0.808, 1.994, 6.621], [-1.511, 1.189, 6.648]], "edges": [{"id": "o18", "type": "o", "length_m": 0.433, "start": [10.195, -4.171, 2.719], "end": [10.213, -3.745, 2.794]}, {"id": "f33", "type": "f", "length_m": 1.491, "start": [10.213, -3.745, 2.794], "end": [9.341, -2.614, 3.222]}, {"id": "f34", "type": "f", "length_m": 9.95, "start": [9.341, -2.614, 3.222], "end": [3.498, 4.914, 6.085]}, {"id": "f35", "type": "f", "length_m": 1.764, "start": [3.498, 4.914, 6.085], "end": [1.831, 4.442, 6.415]}, {"id": "h15", "type": "h", "length_m": 1.015, "start": [1.831, 4.442, 6.415], "end": [0.997, 3.873, 6.518]}, {"id": "h16", "type": "h", "length_m": 2.608, "start": [0.997, 3.873, 6.518], "end": [-0.808, 1.994, 6.621]}, {"id": "h17", "type": "h", "length_m": 1.069, "start": [-0.808, 1.994, 6.621], "end": [-1.511, 1.189, 6.648]}, {"id": "f36", "type": "f", "length_m": 13.461, "start": [-1.511, 1.189, 6.648], "end": [10.195, -4.171, 2.719]}]}, {"id": "R10", "type": "sedlova", "area_m2": 82.16, "pitch_deg": 23.8, "vertices": [[-13.753, 2.946, 3.507], [-1.538, 1.195, 6.37], [0.544, 1.426, 6.644], [1.02, 1.575, 6.667], [3.832, 2.839, 6.652], [4.084, 2.975, 6.641], [4.256, 3.071, 6.632], [4.392, 3.217, 6.597]], "edges": [{"id": "f37", "type": "f", "length_m": 12.668, "start": [-13.753, 2.946, 3.507], "end": [-1.538, 1.195, 6.37]}, {"id": "h18", "type": "h", "length_m": 2.113, "start": [-1.538, 1.195, 6.37], "end": [0.544, 1.426, 6.644]}, {"id": "h19", "type": "h", "length_m": 0.499, "start": [0.544, 1.426, 6.644], "end": [1.02, 1.575, 6.667]}, {"id": "h20", "type": "h", "length_m": 3.083, "start": [1.02, 1.575, 6.667], "end": [3.832, 2.839, 6.652]}, {"id": "h21", "type": "h", "length_m": 0.287, "start": [3.832, 2.839, 6.652], "end": [4.084, 2.975, 6.641]}, {"id": "h22", "type": "h", "length_m": 0.197, "start": [4.084, 2.975, 6.641], "end": [4.256, 3.071, 6.632]}, {"id": "h23", "type": "h", "length_m": 0.203, "start": [4.256, 3.071, 6.632], "end": [4.392, 3.217, 6.597]}, {"id": "f38", "type": "f", "length_m": 18.408, "start": [4.392, 3.217, 6.597], "end": [-13.753, 2.946, 3.507]}]}, {"id": "R11", "type": "sedlova", "area_m2": 17.76, "pitch_deg": 24.6, "vertices": [[2.711, 3.693, 6.405], [5.415, -1.616, 3.766], [5.94, -1.952, 3.491], [6.338, -2.103, 3.318], [6.584, -2.107, 3.241], [6.593, -2.106, 3.239], [7.355, -1.596, 3.18], [7.808, -1.258, 3.157]], "edges": [{"id": "f39", "type": "f", "length_m": 6.516, "start": [2.711, 3.693, 6.405], "end": [5.415, -1.616, 3.766]}, {"id": "o19", "type": "o", "length_m": 0.681, "start": [5.415, -1.616, 3.766], "end": [5.94, -1.952, 3.491]}, {"id": "o20", "type": "o", "length_m": 0.459, "start": [5.94, -1.952, 3.491], "end": [6.338, -2.103, 3.318]}, {"id": "o21", "type": "o", "length_m": 0.258, "start": [6.338, -2.103, 3.318], "end": [6.584, -2.107, 3.241]}, {"id": "o22", "type": "o", "length_m": 0.009, "start": [6.584, -2.107, 3.241], "end": [6.593, -2.106, 3.239]}, {"id": "o23", "type": "o", "length_m": 0.919, "start": [6.593, -2.106, 3.239], "end": [7.355, -1.596, 3.18]}, {"id": "o24", "type": "o", "length_m": 0.566, "start": [7.355, -1.596, 3.18], "end": [7.808, -1.258, 3.157]}, {"id": "f40", "type": "f", "length_m": 7.813, "start": [7.808, -1.258, 3.157], "end": [2.711, 3.693, 6.405]}]}, {"id": "P12", "type": "plosina", "area_m2": 70.75, "pitch_deg": 0.0, "vertices": [[-11.401, 7.07, 2.815], [-11.621, 6.91, 2.815], [-11.621, 6.71, 2.815], [10.719, -5.06, 2.815], [11.109, -5.26, 2.815], [11.339, -5.13, 2.815], [11.519, -4.74, 2.815], [8.199, -1.75, 2.815]], "edges": [{"id": "p1", "type": "p", "length_m": 0.272, "start": [-11.401, 7.07, 2.815], "end": [-11.621, 6.91, 2.815]}, {"id": "p2", "type": "p", "length_m": 0.2, "start": [-11.621, 6.91, 2.815], "end": [-11.621, 6.71, 2.815]}, {"id": "p3", "type": "p", "length_m": 25.251, "start": [-11.621, 6.71, 2.815], "end": [10.719, -5.06, 2.815]}, {"id": "p4", "type": "p", "length_m": 0.438, "start": [10.719, -5.06, 2.815], "end": [11.109, -5.26, 2.815]}, {"id": "p5", "type": "p", "length_m": 0.264, "start": [11.109, -5.26, 2.815], "end": [11.339, -5.13, 2.815]}, {"id": "p6", "type": "p", "length_m": 0.43, "start": [11.339, -5.13, 2.815], "end": [11.519, -4.74, 2.815]}, {"id": "p7", "type": "p", "length_m": 4.468, "start": [11.519, -4.74, 2.815], "end": [8.199, -1.75, 2.815]}, {"id": "p8", "type": "p", "length_m": 21.493, "start": [8.199, -1.75, 2.815], "end": [-11.401, 7.07, 2.815]}]}];
+
+// Center all vertices
+let allX = [], allY = [], allZ = [];
+planes.forEach(p => p.vertices.forEach(v => { allX.push(v[0]); allY.push(v[1]); allZ.push(v[2]); }));
+const cx = (Math.min(...allX) + Math.max(...allX)) / 2;
+const cy = (Math.min(...allY) + Math.max(...allY)) / 2;
+const cz = Math.min(...allZ);
+
+// Render each plane
+planes.forEach((plane, pi) => {
+    const verts = plane.vertices;
+    if (verts.length < 3) return;
+
+    // Triangulate polygon (fan triangulation)
+    const positions = [];
+    for (let i = 1; i < verts.length - 1; i++) {
+        positions.push(verts[0][0] - cx, verts[0][1] - cy, verts[0][2] - cz);
+        positions.push(verts[i][0] - cx, verts[i][1] - cy, verts[i][2] - cz);
+        positions.push(verts[i+1][0] - cx, verts[i+1][1] - cy, verts[i+1][2] - cz);
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geo.computeVertexNormals();
+
+    // Semi-transparent face
+    const hue = (pi * 50 + 30) % 360;
+    const color = new THREE.Color().setHSL(hue/360, 0.5, 0.45);
+    const mat = new THREE.MeshStandardMaterial({color, roughness:0.7, metalness:0.1, side:THREE.DoubleSide, transparent:true, opacity:0.75});
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    scene.add(mesh);
+
+    // Wireframe outline
+    const wireGeo = new THREE.BufferGeometry();
+    const wireVerts = [];
+    for (let i = 0; i < verts.length; i++) {
+        const v1 = verts[i];
+        const v2 = verts[(i+1) % verts.length];
+        wireVerts.push(v1[0]-cx, v1[1]-cy, v1[2]-cz, v2[0]-cx, v2[1]-cy, v2[2]-cz);
+    }
+    wireGeo.setAttribute("position", new THREE.Float32BufferAttribute(wireVerts, 3));
+    const wireMat = new THREE.LineBasicMaterial({color:0x000000, linewidth:1, transparent:true, opacity:0.3});
+    scene.add(new THREE.LineSegments(wireGeo, wireMat));
+
+    // Area label at centroid
+    let cpx = 0, cpy = 0, cpz = 0;
+    verts.forEach(v => { cpx += v[0]-cx; cpy += v[1]-cy; cpz += v[2]-cz; });
+    cpx /= verts.length; cpy /= verts.length; cpz /= verts.length;
+    
+    const div = document.createElement("div");
+    div.textContent = plane.id + "\n" + plane.area_m2.toFixed(1) + "m2";
+    div.style.cssText = "color:#fff;font-size:10px;background:rgba(0,0,0,0.7);padding:2px 6px;border-radius:3px;pointer-events:auto;cursor:default";
+    const label = new CSS2DObject(div);
+    label.position.set(cpx, cpy, cpz);
+    scene.add(label);
+
+    // Edge lines with colors
+    plane.edges.forEach(edge => {
+        const ec = {"o": 16729156, "h": 4491519, "n": 4521796, "u": 16755200, "f": 8947848, "p": 11158783}[edge.type] || 0x888888;
+        const geo2 = new THREE.BufferGeometry();
+        geo2.setAttribute("position", new THREE.Float32BufferAttribute([
+            edge.start[0]-cx, edge.start[1]-cy, edge.start[2]-cz,
+            edge.end[0]-cx, edge.end[1]-cy, edge.end[2]-cz
+        ], 3));
+        const line = new THREE.Line(geo2, new THREE.LineBasicMaterial({color:ec, linewidth:2, transparent:true, opacity:0.9}));
+        scene.add(line);
+
+        // Small sphere at midpoint
+        const mx = (edge.start[0] + edge.end[0])/2 - cx;
+        const my = (edge.start[1] + edge.end[1])/2 - cy;
+        const mz = (edge.start[2] + edge.end[2])/2 - cz;
+        
+        // Edge label
+        const ediv = document.createElement("div");
+        ediv.textContent = edge.id + " " + edge.length_m.toFixed(2) + "m";
+        ediv.style.cssText = "color:#ccc;font-size:9px;background:rgba(0,0,0,0.8);padding:1px 4px;border-radius:2px;pointer-events:auto;cursor:default;border-left:2px solid #" + ec.toString(16).padStart(6,"0");
+        const elabel = new CSS2DObject(ediv);
+        elabel.position.set(mx, my, mz);
+        scene.add(elabel);
+    });
+});
+
+function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+    labelRenderer.render(scene, camera);
+}
+animate();
+window.addEventListener("resize", () => {
+    camera.aspect = container.clientWidth/container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    labelRenderer.setSize(container.clientWidth, container.clientHeight);
+});
+</script>
+</body></html>
