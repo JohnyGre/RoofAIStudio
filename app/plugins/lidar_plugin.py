@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPu
 from PySide6.QtCore import Qt, QThread, Signal
 import webbrowser, json
 from app.plugins.viewer_generator import generate_viewer
+from app.plugins.geometry_viewer import generate_geometry_viewer
 from app.plugins.clean_roof_geometry import CleanRoofGeometry
 
 # Project paths
@@ -286,7 +287,7 @@ class LidarWorker(QThread):
             jpg = os.path.join(OUT_DIR, safe + '_ortofoto.jpg')
             open(jpg, 'wb').write(r.read())
 
-        return {
+        result = {
             'address': display, 'gps': {'lat': info['lat'], 'lon': info['lon']},
             'footprint': '{:.1f} x {:.1f} m'.format(xd, yd),
             'height_ridge': round(float(zmx), 2), 'height_eave': round(float(ez), 2),
@@ -307,6 +308,14 @@ class LidarWorker(QThread):
                 with open(json_path, 'w', encoding='utf-8') as jf:
                     json.dump(roof_data, jf, indent=2, ensure_ascii=False)
                 result['files']['geometry_json'] = json_path
+                # Generate geometry viewer
+                try:
+                    gv_path = os.path.join(OUT_DIR, safe + '_geometry_viewer.html')
+                    generate_geometry_viewer(json_path, jpg, gv_path)
+                    result['files']['geometry_viewer'] = gv_path
+                    webbrowser.open('file:///' + gv_path.replace(chr(92), '/'))
+                except Exception as ve:
+                    self.log.emit('  Geometry viewer: ' + str(ve))
         except Exception as e:
             self.log.emit('  Roof geometry: ' + str(e))
 
@@ -323,6 +332,8 @@ class LidarWorker(QThread):
                 webbrowser.open(url)
         except Exception as e:
             self.log.emit('  Viewer: ' + str(e))
+
+        return result
 
 
 class LidarDialog(QDialog):
