@@ -11,6 +11,7 @@ import webbrowser, json
 from app.plugins.viewer_generator import generate_viewer
 from app.plugins.geometry_viewer import generate_geometry_viewer
 from app.plugins.clean_roof_geometry import CleanRoofGeometry
+from app.plugins.topographic_roof import topographic_roof_analysis
 
 # Project paths
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -353,6 +354,11 @@ class LidarDialog(QDialog):
         self.go_btn.clicked.connect(self._go)
         self.go_btn.setStyleSheet('QPushButton{background:#2d7dd2;color:white;font-weight:bold;padding:6px 20px}')
         gl.addWidget(self.go_btn)
+        self.topo_btn = QPushButton('Topo')
+        self.topo_btn.clicked.connect(self._topo)
+        self.topo_btn.setToolTip('Topographic analysis: height slices -> eave/ridge/corners')
+        self.topo_btn.setStyleSheet('QPushButton{background:#e07b39;color:white;font-weight:bold;padding:6px 16px}')
+        gl.addWidget(self.topo_btn)
         l.addWidget(g)
         self.pb = QProgressBar()
         self.pb.setVisible(False)
@@ -396,6 +402,73 @@ class LidarDialog(QDialog):
             self.lg.append('       ' + res['files']['orthophoto'])
         else:
             self.lg.append('\nFAILED: ' + msg)
+
+
+    def _topo(self):
+        """Run topographic analysis on existing LAZ files."""
+        self.lg.clear()
+        self.lg.append('Topographic Analysis...')
+        self.topo_btn.setEnabled(False)
+        try:
+            import glob, laspy, numpy as np
+            from app.services.single_roof_analyzer import SingleRoofAnalyzer
+            # Find LAZ files
+            laz_files = glob.glob(os.path.join(LAZ_DIR, '*.laz'))
+            laz_files = [f for f in laz_files if '.copc.' not in f]
+            if not laz_files:
+                self.lg.append('No LAZ files found. Run GO first.')
+                self.topo_btn.setEnabled(True)
+                return
+            self.lg.append('LAZ files: {}'.format(len(laz_files)))
+            
+            # Load all building + ground points
+            bp, gp = [], []
+            for f in laz_files:
+                las = laspy.read(f)
+                xs, ys, zs = np.array(las.x), np.array(las.y), np.array(las.z)
+                cls = np.array(las.classification, dtype=np.uint8)
+                bp.append(np.column_stack([xs[cls==6], ys[cls==6], zs[cls==6]]))
+                gp.append(np.column_stack([xs[cls==2], ys[cls==2], zs[cls==2]]))
+            bp = np.vstack(bp); gp = np.vstack(gp)
+            gz = float(np.median(gp[:,2]) if len(gp) > 0 else bp[:,2].min() - 10)
+            self.lg.append('Building pts: {}  Ground: {}  GZ: {:.2f}'.format(len(bp), len(gp), gz))
+            
+            # Run analysis
+            result = topographic_roof_analysis(bp, gz)
+            self.lg.append('Planes: {}  Slices: {}  Ridges: {}'.format(len(result['planes']), result['n_slices'], result['ridge_count']))
+            
+            # Summary
+            self.lg.append('')
+            self.lg.append('=== HRANY STRECHY (TOPOGRAPHIC) ===')
+            names = {'o':'Odkvap','n':'Narozie','u':'Uzlabie','h':'Hreben','f':'Stit'}
+            for ek in ['o','h','n','u','f']:
+                if ek in result['edges_summary']:
+                    e = result['edges_summary'][ek]
+                    self.lg.append('{}: {} hran, {:.2f} m'.format(names.get(ek,ek), e['pocet'], e['celkom_m']))
+            
+            # Generate viewer
+            safe = '_'.join(self.inp.text().strip().replace(',','').replace('/','_').split()[:3]) if self.inp.text().strip() else 'topographic'
+            safe = ''.join(c for c in safe if c.isalnum() or c in '_- ').strip().replace(' ', '_')
+            json_path = os.path.join(OUT_DIR, safe + '_topo.json')
+            with open(json_path, 'w', encoding='utf-8') as jf:
+                json.dump(result, jf, indent=2, ensure_ascii=False, default=str)
+            
+            # Find ortofoto
+            jpg = glob.glob(os.path.join(OUT_DIR, '*ortofoto*.jpg'))
+            jpg_path = jpg[0] if jpg else None
+            
+            gv_path = os.path.join(OUT_DIR, safe + '_topo_viewer.html')
+            generate_geometry_viewer(json_path, jpg_path, gv_path)
+            url = 'file:///' + gv_path.replace(chr(92), '/')
+            webbrowser.open(url)
+            self.lg.append('')
+            self.lg.append('Opened: ' + gv_path)
+        except Exception as e:
+            import traceback
+            self.lg.append('ERROR: ' + str(e))
+            self.lg.append(traceback.format_exc())
+        finally:
+            self.topo_btn.setEnabled(True)
 
 
 def register_plugin(main_window):
