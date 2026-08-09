@@ -18,17 +18,18 @@ from app.controllers.image_controller import ImageController
 from app.controllers.geometry_controller import GeometryController
 from app.controllers.ai_controller import AIController
 from app.core.image.image_model import ImageInfo
-from app.plugins.lidar_plugin import register_plugin as register_lidar_plugin
-from app.plugins.accessories_panel import register_plugin as register_accessories_plugin
 from app.geometry.calibration import CalibrationModel, CalibrationService
 from app.materials.material_repository import SQLAlchemyMaterialRepository
 from app.database.session import get_db_session
 from app.materials.calculation_result import MaterialCalculationResult
 from app.geometry.roof_geometry import RoofGeometry
-from app.ai.ai_result import DetectionResult, SegmentationResult
+from app.ai.ai_result import DetectionResult, SegmentationResult, PolygonGeometry
 from app.geometry.point import Point2D # Added import for Point2D
 from app.geometry.polygon import Polygon2D
 from app.services.single_roof_analyzer import SingleRoofAnalyzer
+from app.plugins.lidar_plugin import register_plugin as register_lidar_plugin
+from app.plugins.accessories_panel import register_plugin as register_accessories_plugin
+import webbrowser, json, os, math, cv2
 
 class MainWindow(QMainWindow):
     """
@@ -49,11 +50,11 @@ class MainWindow(QMainWindow):
         self._create_menu_bar()
         self._create_tool_bar()
         self._create_status_bar()
+        self._create_central_widget()
 
         # Register plugins
         register_lidar_plugin(self)
         register_accessories_plugin(self)
-        self._create_central_widget()
 
         # Initialize database session for repository
         self._db_session = next(get_db_session()) # Get a session for the lifetime of the app
@@ -159,8 +160,10 @@ class MainWindow(QMainWindow):
         self.tool_bar.analyze_triggered.connect(self._on_analyze_roof_action)
         self.tool_bar.measure_triggered.connect(self._on_measure)
         self.tool_bar.calibrate_triggered.connect(self._on_calibrate_image_action) # Connect new toolbar action
-        self.tool_bar.export_triggered.connect(self._on_export_pdf)
+        self.tool_bar.export_triggered.connect(self._on_export_3d)
         self.tool_bar.fetch_triggered.connect(self._on_fetch_address)
+        self.tool_bar.undo_triggered.connect(self.workspace.roof_canvas._undo)
+        self.tool_bar.redo_triggered.connect(self.workspace.roof_canvas._redo)
         self.menu_bar.fetch_address_triggered.connect(self._on_fetch_address)
 
         # ImageController Signals
@@ -400,6 +403,264 @@ class MainWindow(QMainWindow):
         self.status_bar.set_status_message(status_msg)
         print(f"Fetch by Address: {total_planes_str} planes for {address} | Area: {area_m2:.1f} m² | Perimeter: {perimeter_m:.1f} m")
 
+        # Display interactive polygons from planes (editable overlay)
+        try:
+            detection_results = []
+            colors_rgb = [
+                (0, 255, 0), (255, 0, 0), (0, 0, 255),
+                (255, 255, 0), (255, 0, 255), (0, 255, 255),
+            ]
+            for i, plane in enumerate(result.get("planes", [])):
+                contour = plane.get("contour", [])
+                if not contour or len(contour) < 3:
+                    continue
+                vertices = []
+                for pt in contour:
+                    if isinstance(pt[0], (list, tuple)):
+                        vertices.append((float(pt[0][0]), float(pt[0][1])))
+                    else:
+                        vertices.append((float(pt[0]), float(pt[1])))
+                # Douglas-Peucker simplification (remove noise vertices)
+                if len(vertices) > 4:
+                    import numpy as np
+                    contour_np = np.array(vertices, dtype=np.float32).reshape(-1, 1, 2)
+                    epsilon = 4.0  # pixels (~33cm at 12px/m)
+                    simplified = cv2.approxPolyDP(contour_np, epsilon, True)
+                    new_verts = [(float(pt[0][0]), float(pt[0][1])) for pt in simplified]
+                    if len(new_verts) >= 3:
+                        vertices = new_verts
+                score = plane.get("score", 0.5)
+                # Confidence filter: skip low-confidence detections
+                CONF_THRESHOLD = 0.3
+                if score < CONF_THRESHOLD:
+                    print(f"  Skipping plane {i}: confidence {score:.2f} < {CONF_THRESHOLD}")
+                    continue
+                meta = {
+                    "area_m2": plane.get("area_m2"),
+                    "perimeter_m": plane.get("perimeter_m"),
+                    "edge_details": plane.get("edge_details", []),
+                    "color_name": plane.get("color_name", ""),
+                    "color_rgb": colors_rgb[i % len(colors_rgb)],
+                }
+                dr = DetectionResult(
+                    class_name=plane.get("class_name", "roof"),
+                    geometry=PolygonGeometry(vertices=vertices),
+                    confidence=min(max(score, 0.0), 1.0),
+                    metadata=meta,
+                )
+                detection_results.append(dr)
+
+            if detection_results:
+                self.workspace.roof_canvas.set_ai_overlay_mode(True)
+                self.workspace.roof_canvas.set_ai_overlay_scale(result.get("px_per_m", 1.0))
+                self.workspace.roof_canvas.display_ai_results_overlay(detection_results)
+                if hasattr(self, "ai_overlay_action"):
+                    try:
+                        self.ai_overlay_action.setChecked(True)
+                    except Exception:
+                        pass
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            print(f"Interactive polygon overlay failed: {e}")
+            print(tb)
+            QMessageBox.warning(self, "Overlay Error", f"Neuspesne zobrazenie interaktivnych polygonov:\n{e}\n\nPozri terminal pre detaily.")
+
+        # Store for later 3D export
+        self._last_fetch_result = result
+        self._last_address = address.strip()
+
+    def _on_export_pdf(self) -> None:
+        """Export PDF report with material cost."""
+        from app.exporters.pdf_exporter import PDFExporter
+        from app.exporters.pdf_models import CompanyInfo, CustomerReport
+        from pathlib import Path
+        if not hasattr(self, '_last_fetch_result') or not self._last_fetch_result:
+            QMessageBox.warning(self, "No Data", "Najprv nacitajte strechu cez Fetch.")
+            return
+        result = self._last_fetch_result
+        address = getattr(self, '_last_address', 'Strecha')
+        total_area = result.get("total_area_m2", 0)
+        total_perim = result.get("total_perimeter_m", 0)
+        pr = getattr(self, '_last_pricing_result', None)
+
+        report = CustomerReport(
+            customer_name="Zakaznik",
+            customer_address=address,
+            project_name="Analyza strechy",
+            project_address=address,
+            roof_summary=f"Celkova plocha: {total_area} m2, obvod: {total_perim} m",
+            roof_material_name=pr.material_name if pr else None,
+            roof_material_supplier=pr.supplier_name if pr else None,
+            roof_material_price_per_m2=pr.price_per_m2 if pr else None,
+            roof_material_total_price=pr.total_price_eur if pr else None,
+            roof_material_waste_pct=pr.waste_factor * 100 if pr else None,
+        )
+        company = CompanyInfo(
+            company_name="RoofAIStudio",
+            address="", phone="", email="",
+        )
+        out_dir = Path(__file__).resolve().parent.parent.parent / "data" / "exports"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        pdf_path = out_dir / "roof_report.pdf"
+        exporter = PDFExporter()
+        try:
+            exporter.generate_report(report, company, pdf_path)
+            self.status_bar.set_status_message(f"PDF export: {pdf_path}")
+            webbrowser.open(str(pdf_path))
+        except Exception as e:
+            QMessageBox.critical(self, "PDF Error", f"Chyba pri generovani PDF: {e}")
+
+    def _on_export_3d(self) -> None:
+        """Export roof data to JSON with per-vertex heights and open 3D viewer."""
+        from app.visualization.roof_3d import Roof3DExporter
+        from pathlib import Path
+        if not hasattr(self, '_last_fetch_result') or not self._last_fetch_result:
+            QMessageBox.warning(self, "No Data", "Najprv nacitajte strechu cez Fetch.")
+            return
+        result = self._last_fetch_result
+        address = getattr(self, '_last_address', 'Strecha')
+        px_per_m = self.workspace.roof_canvas._ai_overlay_px_per_m or result.get("px_per_m", 12.1)
+        canvas = self.workspace.roof_canvas
+
+        # --- Build perimeter vertex set (in meters) ---
+        perimeter_pts = getattr(canvas, "_outer_perimeter_points", [])
+        perimeter_xy = [(p.x() / px_per_m, p.y() / px_per_m) for p in perimeter_pts] if perimeter_pts else []
+
+        def is_on_perimeter(vx, vy, tol_m=0.3):
+            for px, py in perimeter_xy:
+                if math.hypot(vx - px, vy - py) <= tol_m:
+                    return True
+            return False
+
+        def dist_point_to_segment(p, a, b):
+            px, py = p; ax, ay = a; bx, by = b
+            dx, dy = bx-ax, by-ay
+            L2 = dx*dx + dy*dy
+            if L2 < 1e-9:
+                return math.hypot(px-ax, py-ay)
+            t = max(0.0, min(1.0, ((px-ax)*dx + (py-ay)*dy) / L2))
+            return math.hypot(px-(ax+t*dx), py-(ay+t*dy))
+
+        # --- Collect all plane vertices in meters ---
+        planes_xy = []
+        for plane in canvas._ai_planes:
+            pts = plane.get("polygon_points", [])
+            if len(pts) < 3:
+                continue
+            planes_xy.append([(p.x() / px_per_m, p.y() / px_per_m) for p in pts])
+
+        # --- Compute per-vertex heights (v2: max across owning planes) ---
+        FIXED_HEIGHT = 2.5
+        candidates = {}  # vkey -> set of heights
+        coords = {}
+
+        for plane in planes_xy:
+            n = len(plane)
+            on_perim = [is_on_perimeter(v[0], v[1]) for v in plane]
+            eave_edges = [(plane[i], plane[(i+1)%n]) for i in range(n)
+                          if on_perim[i] and on_perim[(i+1)%n]]
+            for i, v in enumerate(plane):
+                k = (round(v[0], 2), round(v[1], 2))
+                coords[k] = v
+                if on_perim[i]:
+                    candidates.setdefault(k, set()).add(0.0)
+                    continue
+                # Fixed ridge height for all interior (non-perimeter) vertices
+                candidates.setdefault(k, set()).add(FIXED_HEIGHT)
+
+        # Final height = max candidate per unique vertex
+        final_height = {k: max(vs) for k, vs in candidates.items()}
+
+        # --- Build JSON planes with per-vertex heights ---
+        planes_json = []
+        raw_planes = result.get("planes", [])
+        for i, plane_xy in enumerate(planes_xy):
+            n = len(plane_xy)
+            contour = [[[p[0] * px_per_m, p[1] * px_per_m]] for p in plane_xy]
+            vertex_heights = [round(final_height.get((round(v[0],2), round(v[1],2)), 0.0), 3) for v in plane_xy]
+
+            area_px = 0.0
+            for j in range(n):
+                x1, y1 = plane_xy[j][0] * px_per_m, plane_xy[j][1] * px_per_m
+                x2, y2 = plane_xy[(j+1)%n][0] * px_per_m, plane_xy[(j+1)%n][1] * px_per_m
+                area_px += x1*y2 - x2*y1
+            area_m2 = abs(area_px) / (2 * px_per_m * px_per_m)
+            peri_m = sum(math.hypot(
+                (plane_xy[(j+1)%n][0] - plane_xy[j][0]) * px_per_m,
+                (plane_xy[(j+1)%n][1] - plane_xy[j][1]) * px_per_m) / px_per_m for j in range(n))
+
+            planes_json.append({
+                "id": "plane_%d" % i,
+                "class_name": "slope_poly",
+                "color_name": raw_planes[i].get("color_name", "Rovina %d" % (i+1)) if i < len(raw_planes) else "Rovina %d" % (i+1),
+                "area_m2": round(area_m2, 1),
+                "perimeter_m": round(peri_m, 1),
+                "contour": contour,
+                "vertex_heights": vertex_heights,
+                "score": raw_planes[i].get("score", 0.9) if i < len(raw_planes) else 0.9,
+            })
+
+        if not planes_json:
+            QMessageBox.warning(self, "No Data", "Ziadne polygony na export.")
+            return
+
+        # Collect edge classifications from canvas overrides
+        edge_classes = {}
+        canvas_overrides = getattr(canvas, '_edge_class_overrides', {})
+        # Also get auto-classified edges from _update_outer_perimeter
+        # Build edge key -> class mapping from all planes
+        from collections import defaultdict
+        edge_owners = defaultdict(list)
+        for pi, plane in enumerate(canvas._ai_planes):
+            pts_p = plane.get("polygon_points", [])
+            if len(pts_p) < 3: continue
+            for vi in range(len(pts_p)):
+                vj = (vi + 1) % len(pts_p)
+                pa, pb = pts_p[vi], pts_p[vj]
+                xa, ya = pa.x(), pa.y()
+                xb, yb = pb.x(), pb.y()
+                if xa < xb or (xa == xb and ya < yb):
+                    ek = (xa, ya, xb, yb)
+                else:
+                    ek = (xb, yb, xa, ya)
+                edge_owners[ek].append(pi)
+        # For each edge, use override if available, otherwise mark as auto
+        edge_class_list = []
+        for ek, owners in edge_owners.items():
+            cls = canvas_overrides.get(ek, None)
+            if cls is None:
+                # Determine auto class based on owners count
+                cls = "internal" if len(owners) > 1 else "okap"
+            edge_class_list.append({
+                "x1": round(ek[0] / px_per_m, 3),
+                "y1": round(ek[1] / px_per_m, 3),
+                "x2": round(ek[2] / px_per_m, 3),
+                "y2": round(ek[3] / px_per_m, 3),
+                "class": cls,
+                "owners": len(owners),
+            })
+
+        export_data = {
+            "px_per_m": px_per_m, "address": address, "planes": planes_json,
+            "ridge_height_m": 2.5, "slope_deg": 25.0,
+            "edge_classes": edge_class_list,
+        }
+        out_dir = Path(__file__).resolve().parent.parent.parent / "data" / "exports"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        json_path = out_dir / "roof_export.json"
+        html_path = out_dir / "roof_3d_viewer.html"
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(export_data, f, ensure_ascii=False, indent=2)
+        try:
+            Roof3DExporter.export_to_html(str(json_path), str(html_path))
+            webbrowser.open(str(html_path))
+            # Store pricing result for PDF
+            if hasattr(self.workspace, "materials_panel"):
+                self._last_pricing_result = getattr(self.workspace.materials_panel, "_last_result", None)
+            self.status_bar.set_status_message(f"3D export hotovy: {address} -> {html_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", "Failed to generate 3D: " + str(e))
     def _on_about(self) -> None:
         self.status_bar.set_status_message("Action: About")
         print("About triggered")
