@@ -7,9 +7,9 @@ from scipy import ndimage
 from scipy.spatial import Delaunay
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QTextEdit, QProgressBar, QGroupBox)
 from PySide6.QtCore import Qt, QThread, Signal
-import webbrowser
+import webbrowser, json
 from app.plugins.viewer_generator import generate_viewer
-from app.plugins.roof_measure import analyze_roof_from_points
+from app.plugins.clean_roof_geometry import CleanRoofGeometry
 
 # Project paths
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -286,7 +286,7 @@ class LidarWorker(QThread):
             jpg = os.path.join(OUT_DIR, safe + '_ortofoto.jpg')
             open(jpg, 'wb').write(r.read())
 
-        result = {
+        return {
             'address': display, 'gps': {'lat': info['lat'], 'lon': info['lon']},
             'footprint': '{:.1f} x {:.1f} m'.format(xd, yd),
             'height_ridge': round(float(zmx), 2), 'height_eave': round(float(ez), 2),
@@ -296,16 +296,21 @@ class LidarWorker(QThread):
             'points': info['n'], 'files': {'ply': ply, 'obj': obj, 'orthophoto': jpg}
         }
 
-                # Analyze roof planes + edges + materials
+        # Roof geometry analysis
         try:
-            roof_data = analyze_roof_from_points(points, gz)
+            geo = CleanRoofGeometry(points, gz)
+            roof_data = geo.to_json(display)
             if roof_data:
                 result['roof'] = roof_data
-                result['materials'] = roof_data.get('materials', {})
+                result['edges_summary'] = roof_data.get('edges_summary', {})
+                json_path = os.path.join(OUT_DIR, safe + '_geometry.json')
+                with open(json_path, 'w', encoding='utf-8') as jf:
+                    json.dump(roof_data, jf, indent=2, ensure_ascii=False)
+                result['files']['geometry_json'] = json_path
         except Exception as e:
-            self.log.emit('  Roof analysis: ' + str(e))
+            self.log.emit('  Roof geometry: ' + str(e))
 
-        # Generate 3D viewer with smoothing + dimensions
+        # Generate 3D viewer
         viewer_html = os.path.join(OUT_DIR, safe + '_viewer.html')
         try:
             viewer_result = generate_viewer(ply, obj, jpg, result, viewer_html)
@@ -314,13 +319,12 @@ class LidarWorker(QThread):
                 result['files']['smooth_ply'] = viewer_result['smooth_ply']
                 result['files']['smooth_obj'] = viewer_result['smooth_obj']
                 result['dimensions'] = viewer_result['dimensions']
-                # Auto-open viewer in browser
                 url = 'file:///' + viewer_html.replace(chr(92), '/')
                 webbrowser.open(url)
         except Exception as e:
             self.log.emit('  Viewer: ' + str(e))
-        
-        return result
+
+
 class LidarDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -367,20 +371,16 @@ class LidarDialog(QDialog):
         self.pb.setVisible(False)
         if ok and res:
             self.lg.append('\nDONE!')
-            dims = res.get('roof', {})
-            mats = res.get('materials', {})
             self.lg.append('{} | {}m | {}deg | {}'.format(res['footprint'], res['height_ridge'], res['pitch'], res['roof_type']))
-            if mats:
+            es = res.get('edges_summary', {})
+            if es:
                 self.lg.append('')
-                self.lg.append('=== KALKULACIA MATERIALOV ===')
-                self.lg.append('Skridla (s 10% odpadom): {} m2'.format(mats.get('skridla_m2', '?')))
-                self.lg.append('Folia: {} m2'.format(mats.get('folia_m2', '?')))
-                self.lg.append('Okapovy plech: {} m'.format(mats.get('okapove_plechy_m', '?')))
-                self.lg.append('Zlab: {} m'.format(mats.get('zlab_m', '?')))
-                self.lg.append('Hrebenace: {} m'.format(mats.get('hrebenace_m', '?')))
-                mats_uzlabie = mats.get('uzlabie_m', 0)
-                if mats_uzlabie > 0:
-                    self.lg.append('Uzlabie: {} m'.format(mats_uzlabie))
+                self.lg.append('=== HRANY STRECH ===')
+                names = {'o':'Odkvap','n':'Narozie','u':'Uzlabie','h':'Hreben','f':'Stit','p':'Plosina'}
+                for ek in ['o','h','n','u','f','p']:
+                    if ek in es:
+                        e = es[ek]
+                        self.lg.append('{}: {} hran, {:.2f} m'.format(names.get(ek,ek), e['pocet'], e['celkom_m']))
             self.lg.append('Files: ' + res['files']['ply'])
             self.lg.append('       ' + res['files']['orthophoto'])
         else:
