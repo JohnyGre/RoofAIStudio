@@ -405,14 +405,26 @@ class LidarDialog(QDialog):
 
 
     def _topo(self):
-        """Run topographic analysis on existing LAZ files."""
+        """Run topographic analysis on LAZ files filtered to address location."""
         self.lg.clear()
         self.lg.append('Topographic Analysis...')
         self.topo_btn.setEnabled(False)
         try:
             import glob, laspy, numpy as np
-            from app.services.single_roof_analyzer import SingleRoofAnalyzer
-            # Find LAZ files
+            from pyproj import Transformer
+            
+            # Geocode address first
+            addr = self.inp.text().strip()
+            if not addr:
+                self.lg.append('Enter address first.')
+                self.topo_btn.setEnabled(True)
+                return
+            lat, lon, display = self._geocode()
+            self.lg.append('Address: {} ({:.6f}, {:.6f})'.format(display, lat, lon))
+            
+            # Filter LAZ points by building location
+            t = Transformer.from_crs('EPSG:4326', 'EPSG:8353', always_xy=True)
+            te, tn = t.transform(lon, lat)
             laz_files = glob.glob(os.path.join(LAZ_DIR, '*.laz'))
             laz_files = [f for f in laz_files if '.copc.' not in f]
             if not laz_files:
@@ -421,16 +433,24 @@ class LidarDialog(QDialog):
                 return
             self.lg.append('LAZ files: {}'.format(len(laz_files)))
             
-            # Load all building + ground points
+            # Load building + ground points within 60m radius
             bp, gp = [], []
             for f in laz_files:
                 las = laspy.read(f)
                 xs, ys, zs = np.array(las.x), np.array(las.y), np.array(las.z)
                 cls = np.array(las.classification, dtype=np.uint8)
-                bp.append(np.column_stack([xs[cls==6], ys[cls==6], zs[cls==6]]))
-                gp.append(np.column_stack([xs[cls==2], ys[cls==2], zs[cls==2]]))
-            bp = np.vstack(bp); gp = np.vstack(gp)
-            gz = float(np.median(gp[:,2]) if len(gp) > 0 else bp[:,2].min() - 10)
+                d = np.sqrt((xs - te)**2 + (ys - tn)**2)
+                n = d < 60
+                bm = n & (cls == 6); gm = n & (cls == 2)
+                if np.any(bm): bp.append(np.column_stack([xs[bm], ys[bm], zs[bm]]))
+                if np.any(gm): gp.append(np.column_stack([xs[gm], ys[gm], zs[gm]]))
+            
+            if not bp:
+                self.lg.append('No building points near address.')
+                self.topo_btn.setEnabled(True)
+                return
+            bp = np.vstack(bp); gp = np.vstack(gp) if gp else np.array([[0,0,0]])
+            gz = float(np.median(gp[:,2]) if len(gp) > 10 else bp[:,2].min() - 10)
             self.lg.append('Building pts: {}  Ground: {}  GZ: {:.2f}'.format(len(bp), len(gp), gz))
             
             # Run analysis
