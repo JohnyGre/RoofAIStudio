@@ -11,7 +11,6 @@ import webbrowser, json
 from app.plugins.viewer_generator import generate_viewer
 from app.plugins.geometry_viewer import generate_geometry_viewer
 from app.plugins.clean_roof_geometry import CleanRoofGeometry
-from app.plugins.topographic_roof import topographic_roof_analysis
 
 # Project paths
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -354,14 +353,9 @@ class LidarDialog(QDialog):
         self.go_btn.clicked.connect(self._go)
         self.go_btn.setStyleSheet('QPushButton{background:#2d7dd2;color:white;font-weight:bold;padding:6px 20px}')
         gl.addWidget(self.go_btn)
-        self.topo_btn = QPushButton('Topo')
-        self.topo_btn.clicked.connect(self._topo)
-        self.topo_btn.setToolTip('Topographic analysis: height slices - eave/ridge/corners')
-        self.topo_btn.setStyleSheet('QPushButton{background:#e07b39;color:white;font-weight:bold;padding:6px 16px}')
-        gl.addWidget(self.topo_btn)
         self.tmesh_btn = QPushButton('Trimesh')
         self.tmesh_btn.clicked.connect(self._trimesh_split)
-        self.tmesh_btn.setToolTip('Trimesh face-normal clustering: split roof into 8 clean planes')
+        self.tmesh_btn.setToolTip('Face-normal clustering: split roof into clean planes')
         self.tmesh_btn.setStyleSheet('QPushButton{background:#39a0e0;color:white;font-weight:bold;padding:6px 16px}')
         gl.addWidget(self.tmesh_btn)
         l.addWidget(g)
@@ -407,95 +401,6 @@ class LidarDialog(QDialog):
             self.lg.append('       ' + res['files']['orthophoto'])
         else:
             self.lg.append('\nFAILED: ' + msg)
-
-
-    def _topo(self):
-        """Run topographic analysis on existing PLY mesh (output folder)."""
-        self.lg.clear()
-        self.lg.append('Topographic Analysis (PLY mesh)...')
-        self.topo_btn.setEnabled(False)
-        try:
-            import glob, numpy as np
-            
-            # Find PLY file in output folder
-            addr = self.inp.text().strip()
-            safe_prefix = '_'.join(addr.replace(',','').replace('/','_').split()[:3]) if addr else ''
-            safe_prefix = ''.join(c for c in safe_prefix if c.isalnum() or c in '_- ').strip().replace(' ', '_')
-            
-            ply_files = glob.glob(os.path.join(OUT_DIR, '*smooth.ply'))
-            if not ply_files:
-                ply_files = glob.glob(os.path.join(OUT_DIR, '*.ply'))
-                ply_files = [f for f in ply_files if 'viewer' not in f and '_topo' not in f]
-            
-            if not ply_files:
-                self.lg.append('No PLY mesh found. Run GO first to generate mesh.')
-                self.topo_btn.setEnabled(True)
-                return
-            
-            # Use most recent PLY
-            ply_path = max(ply_files, key=os.path.getmtime)
-            self.lg.append('Mesh: {}'.format(os.path.basename(ply_path)))
-            
-            # Parse PLY vertices
-            verts = []
-            with open(ply_path, 'r') as f:
-                lines = f.readlines()
-            n_verts = 0
-            header_end = 0
-            for i, l in enumerate(lines):
-                if l.startswith('element vertex '):
-                    n_verts = int(l.split()[-1])
-                if 'end_header' in l:
-                    header_end = i + 1
-                    break
-            for i in range(header_end, header_end + n_verts):
-                parts = lines[i].strip().split()
-                if len(parts) >= 3:
-                    verts.append([float(parts[0]), float(parts[1]), float(parts[2])])
-            
-            pts = np.array(verts)
-            self.lg.append('Vertices: {}  XY: {:.1f}x{:.1f}m  Z: {:.1f}-{:.1f}m'.format(
-                len(pts), pts[:,0].max()-pts[:,0].min(), pts[:,1].max()-pts[:,1].min(),
-                pts[:,2].min(), pts[:,2].max()))
-            
-            # Ground Z is min Z (PLY is relative)
-            gz = float(pts[:,2].min())
-            
-            # Run topographic analysis
-            result = topographic_roof_analysis(pts, gz)
-            self.lg.append('Planes: {}  Slices: {}  Ridges: {}'.format(len(result['planes']), result['n_slices'], result['ridge_count']))
-            
-            # Summary
-            self.lg.append('')
-            self.lg.append('=== HRANY STRECHY (TOPOGRAPHIC) ===')
-            names = {'o':'Odkvap','n':'Narozie','u':'Uzlabie','h':'Hreben','f':'Stit'}
-            for ek in ['o','h','n','u','f']:
-                if ek in result['edges_summary']:
-                    e = result['edges_summary'][ek]
-                    self.lg.append('{}: {} hran, {:.2f} m'.format(names.get(ek,ek), e['pocet'], e['celkom_m']))
-            
-            # Generate viewer
-            safe = os.path.splitext(os.path.basename(ply_path))[0] + '_topo'
-            json_path = os.path.join(OUT_DIR, safe + '.json')
-            with open(json_path, 'w', encoding='utf-8') as jf:
-                json.dump(result, jf, indent=2, ensure_ascii=False, default=str)
-            
-            # Find ortofoto
-            jpg = glob.glob(os.path.join(OUT_DIR, '*ortofoto*.jpg'))
-            jpg_path = jpg[0] if jpg else None
-            
-            gv_path = os.path.join(OUT_DIR, safe + '_viewer.html')
-            generate_geometry_viewer(json_path, jpg_path, gv_path)
-            url = 'file:///' + gv_path.replace(chr(92), '/')
-            webbrowser.open(url)
-            self.lg.append('')
-            self.lg.append('Opened: ' + os.path.basename(gv_path))
-        except Exception as e:
-            import traceback
-            self.lg.append('ERROR: ' + str(e))
-            self.lg.append(traceback.format_exc())
-        finally:
-            self.topo_btn.setEnabled(True)
 
 
     def _trimesh_split(self):

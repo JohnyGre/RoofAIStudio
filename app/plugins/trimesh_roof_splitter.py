@@ -89,10 +89,11 @@ def mesh_to_roof_planes(ply_path, min_slope=10, max_slope=85, min_faces=50):
             verts_3d = mesh.vertices[list(comp_verts)]
             boundary_2d = _get_boundary_polygon(verts_3d[:, :2])
             
-            # Build basis from normal for per-vertex Z
-            z_plane = verts_3d[:, 2].min()
+            # Fit plane equation: normal_x*x + normal_y*y + normal_z*z = d
+            centroid = verts_3d.mean(axis=0)
+            d = np.dot(comp_n, centroid)
             
-            # Area from convex hull
+            # Area from convex hull (in 3D)
             try:
                 hull = ConvexHull(verts_3d[:, :2])
                 area_2d = float(hull.volume)
@@ -100,23 +101,33 @@ def mesh_to_roof_planes(ply_path, min_slope=10, max_slope=85, min_faces=50):
             except:
                 area_2d = area_3d = 0
             
-            # Compute edge lengths from boundary polygon
+            # Per-vertex Z from plane equation: z = (d - n_x*x - n_y*y) / n_z
+            def plane_z(x, y):
+                if abs(comp_n[2]) > 1e-6:
+                    return (d - comp_n[0]*x - comp_n[1]*y) / comp_n[2]
+                return centroid[2]
+            
+            # Compute edge lengths from boundary polygon with real 3D Z
             edges_3d = []
             bv = boundary_2d
             for ei in range(len(bv)):
-                v1 = np.array([bv[ei][0], bv[ei][1], z_plane])
-                v2 = np.array([bv[(ei+1)%len(bv)][0], bv[(ei+1)%len(bv)][1], z_plane])
+                z1 = float(plane_z(bv[ei][0], bv[ei][1]))
+                z2 = float(plane_z(bv[(ei+1)%len(bv)][0], bv[(ei+1)%len(bv)][1]))
+                v1 = np.array([bv[ei][0], bv[ei][1], z1])
+                v2 = np.array([bv[(ei+1)%len(bv)][0], bv[(ei+1)%len(bv)][1], z2])
                 elen = float(np.linalg.norm(v2 - v1))
                 if elen < 0.3:
                     continue
+                etype = 'o'  # Default; edges with varying Z are 'f' (stit)
+                if abs(z2 - z1) > 0.3: etype = 'f'
                 edges_3d.append({
                     'id': f'e{len(edges_3d)+1}',
-                    'type': 'o',  # Default, reclassified later
+                    'type': etype,
                     'length_m': round(elen, 3),
                     'v1': ei,
                     'v2': (ei+1) % len(bv),
-                    'start': [round(float(bv[ei][0]),3), round(float(bv[ei][1]),3), round(float(z_plane),3)],
-                    'end': [round(float(bv[(ei+1)%len(bv)][0]),3), round(float(bv[(ei+1)%len(bv)][1]),3), round(float(z_plane),3)],
+                    'start': [round(float(bv[ei][0]),3), round(float(bv[ei][1]),3), round(z1, 3)],
+                    'end': [round(float(bv[(ei+1)%len(bv)][0]),3), round(float(bv[(ei+1)%len(bv)][1]),3), round(z2, 3)],
                 })
             
             zs = verts_3d[:, 2]
@@ -128,7 +139,7 @@ def mesh_to_roof_planes(ply_path, min_slope=10, max_slope=85, min_faces=50):
                 'z_min_m': round(float(zs.min()), 2),
                 'z_max_m': round(float(zs.max()), 2),
                 'n_faces': len(comp),
-                'vertices_3d': [[round(float(bv[i][0]),3), round(float(bv[i][1]),3), round(float(z_plane),3)] for i in range(len(bv))],
+                'vertices_3d': [[round(float(bv[i][0]),3), round(float(bv[i][1]),3), round(float(plane_z(bv[i][0], bv[i][1])),3)] for i in range(len(bv))],
                 'edges': edges_3d,
             })
     
