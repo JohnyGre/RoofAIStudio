@@ -313,7 +313,7 @@ class LidarWorker(QThread):
                     gv_path = os.path.join(OUT_DIR, safe + '_geometry_viewer.html')
                     generate_geometry_viewer(json_path, jpg, gv_path)
                     result['files']['geometry_viewer'] = gv_path
-                    webbrowser.open('file:///' + gv_path.replace(chr(92), '/'))
+                    webbrowser.open("http://localhost:8080/" + os.path.basename(gv_path))
                 except Exception as ve:
                     self.log.emit('  Geometry viewer: ' + str(ve))
         except Exception as e:
@@ -329,7 +329,7 @@ class LidarWorker(QThread):
                 result['files']['smooth_obj'] = viewer_result['smooth_obj']
                 result['dimensions'] = viewer_result['dimensions']
                 url = 'file:///' + viewer_html.replace(chr(92), '/')
-                webbrowser.open(url)
+                webbrowser.open("http://localhost:8080/" + os.path.basename(gv_path))
         except Exception as e:
             self.log.emit('  Viewer: ' + str(e))
 
@@ -450,7 +450,7 @@ class LidarDialog(QDialog):
             jpg = glob.glob(os.path.join(OUT_DIR, '*ortofoto*.jpg'))
             gv_path = os.path.join(OUT_DIR, safe + '_trimesh_viewer.html')
             generate_geometry_viewer(json_path, jpg[0] if jpg else None, gv_path)
-            webbrowser.open('file:///' + gv_path.replace(chr(92), '/'))
+            webbrowser.open("http://localhost:8080/" + os.path.basename(gv_path))
             self.lg.append('')
             self.lg.append('Opened: {} ({} planes, {:.1f}m2)'.format(os.path.basename(gv_path), len(planes), total_area))
         except Exception as e:
