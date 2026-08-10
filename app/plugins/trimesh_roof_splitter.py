@@ -155,6 +155,9 @@ def _fix_roof_topology(planes, snap_distance=0.6, z_tolerance=0.3):
     for p in planes:
         for e in p.get('edges', []):
             e.pop('_v1', None); e.pop('_v2', None)
+        for k in ('start', 'end'):
+            if k in e and hasattr(e.get(k), 'tolist'):
+                e[k] = list(e[k])
             e.pop('_is_eave', None); e.pop('_is_ridge', None)
     
     # Fix false     # Fix false 'o' edges near ridge
