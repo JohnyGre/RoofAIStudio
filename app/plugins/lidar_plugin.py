@@ -356,9 +356,14 @@ class LidarDialog(QDialog):
         gl.addWidget(self.go_btn)
         self.topo_btn = QPushButton('Topo')
         self.topo_btn.clicked.connect(self._topo)
-        self.topo_btn.setToolTip('Topographic analysis: height slices -> eave/ridge/corners')
+        self.topo_btn.setToolTip('Topographic analysis: height slices - eave/ridge/corners')
         self.topo_btn.setStyleSheet('QPushButton{background:#e07b39;color:white;font-weight:bold;padding:6px 16px}')
         gl.addWidget(self.topo_btn)
+        self.tmesh_btn = QPushButton('Trimesh')
+        self.tmesh_btn.clicked.connect(self._trimesh_split)
+        self.tmesh_btn.setToolTip('Trimesh face-normal clustering: split roof into 8 clean planes')
+        self.tmesh_btn.setStyleSheet('QPushButton{background:#39a0e0;color:white;font-weight:bold;padding:6px 16px}')
+        gl.addWidget(self.tmesh_btn)
         l.addWidget(g)
         self.pb = QProgressBar()
         self.pb.setVisible(False)
@@ -491,6 +496,64 @@ class LidarDialog(QDialog):
             self.lg.append(traceback.format_exc())
         finally:
             self.topo_btn.setEnabled(True)
+
+
+    def _trimesh_split(self):
+        """Run Trimesh face-normal clustering on existing PLY mesh."""
+        self.lg.clear()
+        self.lg.append('Trimesh Face-Normal Split...')
+        self.tmesh_btn.setEnabled(False)
+        try:
+            import glob, json, os
+            from app.plugins.trimesh_roof_splitter import mesh_to_roof_planes
+            from app.plugins.geometry_viewer import generate_geometry_viewer
+            
+            # Find PLY mesh
+            ply_files = glob.glob(os.path.join(OUT_DIR, '*smooth.ply'))
+            if not ply_files:
+                ply_files = [f for f in glob.glob(os.path.join(OUT_DIR, '*.ply')) if 'viewer' not in f and '_topo' not in f]
+            if not ply_files:
+                self.lg.append('No PLY mesh found. Run GO first.')
+                self.tmesh_btn.setEnabled(True)
+                return
+            
+            ply_path = max(ply_files, key=os.path.getmtime)
+            self.lg.append('Mesh: {}'.format(os.path.basename(ply_path)))
+            
+            # Run face-normal clustering
+            planes = mesh_to_roof_planes(ply_path)
+            self.lg.append('Roof planes found: {}'.format(len(planes)))
+            
+            yolo_addr = self.inp.text().strip() or 'Atriova'
+            safe = '_'.join(yolo_addr.replace(',','').replace('/','_').split()[:3])
+            safe = ''.join(c for c in safe if c.isalnum() or c in '_- ').strip().replace(' ', '_')
+            
+            total_area = 0
+            for p in planes:
+                total_area += p['area_m2']
+                self.lg.append('  {} a={:.1f}m2 p={:.1f}deg f={} e={}'.format(
+                    p['id'], p['area_m2'], p['pitch_deg'], p['n_faces'], len(p['edges'])))
+            self.lg.append('Total: {:.1f}m2'.format(total_area))
+            
+            # Save JSON
+            result = {'planes': planes, 'address': yolo_addr, 'total_area_m2': round(total_area,2)}
+            json_path = os.path.join(OUT_DIR, safe + '_trimesh.json')
+            with open(json_path, 'w', encoding='utf-8') as jf:
+                json.dump(result, jf, indent=2, ensure_ascii=False, default=str)
+            
+            # Generate viewer
+            jpg = glob.glob(os.path.join(OUT_DIR, '*ortofoto*.jpg'))
+            gv_path = os.path.join(OUT_DIR, safe + '_trimesh_viewer.html')
+            generate_geometry_viewer(json_path, jpg[0] if jpg else None, gv_path)
+            webbrowser.open('file:///' + gv_path.replace(chr(92), '/'))
+            self.lg.append('')
+            self.lg.append('Opened: {} ({} planes, {:.1f}m2)'.format(os.path.basename(gv_path), len(planes), total_area))
+        except Exception as e:
+            import traceback
+            self.lg.append('ERROR: ' + str(e))
+            self.lg.append(traceback.format_exc())
+        finally:
+            self.tmesh_btn.setEnabled(True)
 
 
 def register_plugin(main_window):
