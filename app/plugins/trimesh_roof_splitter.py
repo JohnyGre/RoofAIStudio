@@ -12,27 +12,31 @@ from sklearn.neighbors import KDTree
 from scipy.spatial import ConvexHull
 
 Z_TOL = 0.25        # tolerance for "horizontal" edge (m)
-ANGLE_TOL = 15.0     # degrees for colinear merge
+ANGLE_TOL = 30.0     # degrees for colinear merge
 EDGE_NEAR = 0.5     # m - edges closer than this are neighbors
 
-def _simplify_edge_points(points_3d, angle_tolerance=ANGLE_TOL):
-    """Merge colinear edge points; keep only real corners."""
+def _simplify_edge_points(points_3d, max_verts=8):
+    """DP simplification to get max_verts key corners."""
     pts = np.asarray(points_3d)
-    if len(pts) < 3:
+    if len(pts) <= max_verts:
         return pts
-    simplified = [pts[0]]
-    for i in range(1, len(pts) - 1):
-        v1 = pts[i] - pts[i-1]
-        v2 = pts[i+1] - pts[i]
-        n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
-        if n1 < 1e-6 or n2 < 1e-6:
-            continue
-        cos_a = np.clip(np.dot(v1/n1, v2/n2), -1.0, 1.0)
-        angle = np.degrees(np.arccos(cos_a))
-        if angle > angle_tolerance:
-            simplified.append(pts[i])
-    simplified.append(pts[-1])
-    return np.array(simplified)
+    import cv2
+    contour = pts[:, :2].astype(np.float32).reshape(-1, 1, 2)
+    diag = np.linalg.norm(pts[:, :2].max(axis=0) - pts[:, :2].min(axis=0))
+    eps_lo, eps_hi = diag * 0.01, diag * 0.50
+    for _ in range(12):
+        eps = (eps_lo + eps_hi) / 2
+        simp = cv2.approxPolyDP(contour, eps, True).reshape(-1, 2)
+        if len(simp) <= max_verts:
+            eps_hi = eps
+        else:
+            eps_lo = eps
+    simp = cv2.approxPolyDP(contour, eps_hi, True).reshape(-1, 2)
+    result = []
+    for s in simp:
+        dists = np.linalg.norm(pts[:, :2] - s, axis=1)
+        result.append(pts[np.argmin(dists)])
+    return np.array(result)
 
 def _fix_roof_topology(planes, snap_distance=0.6, z_tolerance=0.3):
     """Snap nearby 'f' edges between planes -> narozie/uzlabie. Fix false 'o' near ridge."""
@@ -342,7 +346,7 @@ def _get_boundary_polygon(points_2d):
         import cv2
         contour = np.array(hull_pts, dtype=np.float32).reshape(-1, 1, 2)
         diag = np.linalg.norm(points_2d.max(axis=0) - points_2d.min(axis=0))
-        epsilon = diag * 0.02
+        epsilon = diag * 0.03
         simplified = cv2.approxPolyDP(contour, epsilon, True)
         result = simplified.reshape(-1, 2)
         if len(result) >= 3:
