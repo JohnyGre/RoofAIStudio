@@ -94,7 +94,70 @@ def _fix_roof_topology(planes, snap_distance=0.6, z_tolerance=0.3):
                 orig_edge2["start"] = avg_start.tolist()
                 orig_edge2["end"] = avg_end.tolist()
     
-    # Fix false 'o' edges near ridge
+    # Classify sloped edges by angle from CONNECTED eave (not any eave)
+    for p in planes:
+        verts = np.array(p.get('vertices_3d', []))
+        if len(verts) < 3:
+            continue
+        nv = len(verts)
+        z_min = min(v[2] for v in verts)
+        
+        # Mark edges
+        for ei, e in enumerate(p.get('edges', [])):
+            v1 = verts[e.get('v1', ei)]
+            v2 = verts[e.get('v2', (ei+1) % nv)]
+            mz = (v1[2] + v2[2]) / 2
+            dz = abs(v2[2] - v1[2])
+            e['_v1'] = v1; e['_v2'] = v2
+            e['_is_eave'] = (dz < 0.3 and abs(mz - z_min) < 0.4)
+            e['_is_ridge'] = (dz < 0.3 and not e['_is_eave'])
+        
+        for ei, e in enumerate(p.get('edges', [])):
+            if e.get('_is_eave') or e.get('_is_ridge'):
+                continue
+            if e['type'] in ('n', 'u'):
+                continue  # already classified
+            
+            ed = (e['_v2'] - e['_v1'])[:2]
+            en = np.linalg.norm(ed)
+            if en < 0.3: continue
+            ed_u = ed / en
+            
+            # Find connected eave edge (shares a vertex)
+            v1_idx = e.get('v1', ei)
+            v2_idx = e.get('v2', (ei+1) % nv)
+            
+            angle = 90
+            for ej, e2 in enumerate(p.get('edges', [])):
+                if not e2.get('_is_eave'): continue
+                ev1 = e2.get('v1', ej)
+                ev2 = e2.get('v2', (ej+1) % nv)
+                # Check shared vertex
+                if v1_idx == ev2 or v2_idx == ev1:
+                    # eave enters at start, edge leaves at start
+                    eav = (e2['_v1'] - e2['_v2'])[:2] if v1_idx == ev2 else (e2['_v2'] - e2['_v1'])[:2]
+                elif v1_idx == ev1 or v2_idx == ev2:
+                    eav = (e2['_v2'] - e2['_v1'])[:2] if v1_idx == ev1 else (e2['_v1'] - e2['_v2'])[:2]
+                else:
+                    continue
+                en_ = np.linalg.norm(eav)
+                if en_ < 0.3: continue
+                cos_a = np.dot(ed_u, eav / en_)
+                angle = np.degrees(np.arccos(np.clip(cos_a, -1, 1)))
+                break
+            
+            if angle < 90:
+                e['type'] = 'n'
+            elif angle > 90:
+                e['type'] = 'u'
+    
+    # Clean up
+    for p in planes:
+        for e in p.get('edges', []):
+            e.pop('_v1', None); e.pop('_v2', None)
+            e.pop('_is_eave', None); e.pop('_is_ridge', None)
+    
+    # Fix false     # Fix false 'o' edges near ridge
     for plane in planes:
         verts = plane.get("vertices_3d", [])
         if not verts:
@@ -320,11 +383,12 @@ def mesh_to_roof_planes(ply_path, min_slope=10, max_slope=85, min_faces=50):
                 'edges': [],  # will be filled by classify
             })
     
-    # Classify all edges with inter-plane neighbor context
+    # Classify edges with inter-plane neighbor context
     _classify_edges(planes)
     
-    # Fix topology: snap nearby edges, reclassify f->n/u, fix false o->h
+    # Fix topology + expand + reclassify by angle from eave
     _fix_roof_topology(planes, snap_distance=0.8)
+
     
     # Clean up internal fields
     for p in planes:
@@ -447,11 +511,12 @@ def mesh_to_roof_planes(ply_path, min_slope=10, max_slope=85, min_faces=50):
                 'edges': [],  # will be filled by classify
             })
     
-    # Classify all edges with inter-plane neighbor context
+    # Classify edges with inter-plane neighbor context
     _classify_edges(planes)
     
-    # Fix topology: snap nearby edges, reclassify f->n/u, fix false o->h
+    # Fix topology + expand + reclassify by angle from eave
     _fix_roof_topology(planes, snap_distance=0.8)
+
     
     # Clean up internal fields
     for p in planes:
