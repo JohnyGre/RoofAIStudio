@@ -34,6 +34,79 @@ def _simplify_edge_points(points_3d, angle_tolerance=ANGLE_TOL):
     simplified.append(pts[-1])
     return np.array(simplified)
 
+def _fix_roof_topology(planes, snap_distance=0.6, z_tolerance=0.3):
+    """Snap nearby 'f' edges between planes -> narozie/uzlabie. Fix false 'o' near ridge."""
+    from scipy.spatial import KDTree
+    
+    edge_centroids = []
+    edge_refs = []
+    for p_idx, plane in enumerate(planes):
+        for e_idx, edge in enumerate(plane.get("edges", [])):
+            p1 = np.array(edge["start"])
+            p2 = np.array(edge["end"])
+            centroid = (p1 + p2) / 2.0
+            edge_centroids.append(centroid)
+            edge_refs.append({"p_idx": p_idx, "e_idx": e_idx, "type": edge["type"]})
+    
+    if not edge_centroids:
+        return planes
+    
+    tree = KDTree(edge_centroids)
+    processed_pairs = set()
+    
+    for i, ref in enumerate(edge_refs):
+        if ref["type"] != "f":
+            continue
+        neighbors = tree.query_ball_point(edge_centroids[i], r=snap_distance)
+        
+        for n_idx in neighbors:
+            if n_idx == i or tuple(sorted([i, n_idx])) in processed_pairs:
+                continue
+            neighbor_ref = edge_refs[n_idx]
+            if ref["p_idx"] != neighbor_ref["p_idx"] and neighbor_ref["type"] in ["f", "o"]:
+                processed_pairs.add(tuple(sorted([i, n_idx])))
+                
+                plane1 = planes[ref["p_idx"]]
+                plane2 = planes[neighbor_ref["p_idx"]]
+                
+                c1 = np.mean([v for v in plane1.get("vertices_3d", [])], axis=0)
+                c2 = np.mean([v for v in plane2.get("vertices_3d", [])], axis=0)
+                
+                edge_z = edge_centroids[i][2]
+                avg_plane_z = (c1[2] + c2[2]) / 2.0
+                new_type = "n" if edge_z > avg_plane_z else "u"
+                
+                planes[ref["p_idx"]]["edges"][ref["e_idx"]]["type"] = new_type
+                planes[neighbor_ref["p_idx"]]["edges"][neighbor_ref["e_idx"]]["type"] = new_type
+                
+                orig_edge1 = planes[ref["p_idx"]]["edges"][ref["e_idx"]]
+                orig_edge2 = planes[neighbor_ref["p_idx"]]["edges"][neighbor_ref["e_idx"]]
+                
+                avg_start = (np.array(orig_edge1["start"]) + np.array(orig_edge2["start"])) / 2.0
+                avg_end = (np.array(orig_edge1["end"]) + np.array(orig_edge2["end"])) / 2.0
+                
+                orig_edge1["start"] = avg_start.tolist()
+                orig_edge1["end"] = avg_end.tolist()
+                orig_edge2["start"] = avg_start.tolist()
+                orig_edge2["end"] = avg_end.tolist()
+    
+    # Fix false 'o' edges near ridge
+    for plane in planes:
+        verts = plane.get("vertices_3d", [])
+        if not verts:
+            continue
+        z_coords = [v[2] for v in verts]
+        max_z = np.percentile(z_coords, 90)  # 90th percentile, not absolute max
+        
+        for edge in plane.get("edges", []):
+            if edge["type"] == "o":
+                avg_edge_z = (edge["start"][2] + edge["end"][2]) / 2.0
+                if abs(max_z - avg_edge_z) < z_tolerance:
+                    edge["type"] = "h"
+    
+    return planes
+
+
 def _classify_edges(planes):
     """Classify every edge across all planes using Z-context + neighbor normals.
     
@@ -246,6 +319,9 @@ def mesh_to_roof_planes(ply_path, min_slope=10, max_slope=85, min_faces=50):
     # Classify all edges with inter-plane neighbor context
     _classify_edges(planes)
     
+    # Fix topology: snap nearby edges, reclassify f->n/u, fix false o->h
+    _fix_roof_topology(planes, snap_distance=0.8)
+    
     # Clean up internal fields
     for p in planes:
         p.pop('_normal', None)
@@ -369,6 +445,9 @@ def mesh_to_roof_planes(ply_path, min_slope=10, max_slope=85, min_faces=50):
     
     # Classify all edges with inter-plane neighbor context
     _classify_edges(planes)
+    
+    # Fix topology: snap nearby edges, reclassify f->n/u, fix false o->h
+    _fix_roof_topology(planes, snap_distance=0.8)
     
     # Clean up internal fields
     for p in planes:
