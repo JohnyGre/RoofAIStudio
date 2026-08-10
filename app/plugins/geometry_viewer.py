@@ -102,12 +102,12 @@ body{background:#1a1a2e;font-family:system-ui,sans-serif;overflow:hidden}
 
     html += '''
 <script type="importmap">
-{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+{"imports":{"three":"./three.module.js","three/addons/":"./"}}
 </script>
 <script type="module">
 import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+import { OrbitControls } from "three/addons/OrbitControls.js";
+import { CSS2DRenderer, CSS2DObject } from "three/addons/CSS2DRenderer.js";
 
 const container = document.getElementById("container");
 const scene = new THREE.Scene();
