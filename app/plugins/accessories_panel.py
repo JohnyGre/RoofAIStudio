@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 # Resolve project root
-_PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PROJECT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CSV_PATH = os.path.join(_PROJECT, "data", "cennik_doplnky.csv")
 
 
