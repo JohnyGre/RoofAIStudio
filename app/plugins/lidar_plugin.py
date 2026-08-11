@@ -20,6 +20,56 @@ OUT_DIR = os.path.join(_PROJECT, 'output')
 os.makedirs(LAZ_DIR, exist_ok=True)
 os.makedirs(OUT_DIR, exist_ok=True)
 
+# --- Automaticky spusteny HTTP server pre *_viewer.html suboru (Claude fix) ---
+# Predtym appka len otvarala http://localhost:8080/... a spolahala sa, ze
+# tam niekto rucne spustil `python -m http.server 8080` v output/ priecinku -
+# ked ten terminal zatvoril/nespustil, prehliadac vratil ERR_CONNECTION_REFUSED.
+# Teraz sa server spusti sam na pozadi (daemon thread), pri prvom pouziti,
+# a bezi po celu dobu behu appky.
+_VIEWER_HTTP_SERVER_PORT = 8080
+_viewer_http_server_started = False
+
+
+def ensure_viewer_http_server(port: int = _VIEWER_HTTP_SERVER_PORT, directory: str = OUT_DIR) -> bool:
+    """
+    Zaisti, ze na danom porte bezi HTTP server servujuci `directory`.
+    Bezpecne volatelne opakovane (no-op ak uz bezi). Vracia True ak server
+    bezi (bud uz bezal, alebo sa prave spustil), False ak sa nepodarilo
+    spustit (napr. port uz obsadeny inym procesom - v tom pripade sa
+    predpoklada, ze ten iny proces uz servuje spravny obsah).
+    """
+    global _viewer_http_server_started
+    if _viewer_http_server_started:
+        return True
+
+    import http.server
+    import socket
+    import threading
+
+    # over, ci port uz nie je obsadeny (napr. rucne spustenym serverom)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.3)
+        if s.connect_ex(('127.0.0.1', port)) == 0:
+            # niekto uz na tomto porte pocuva - neotravuj, pouzi ho
+            _viewer_http_server_started = True
+            return True
+
+    try:
+        handler_cls = lambda *a, **kw: http.server.SimpleHTTPRequestHandler(
+            *a, directory=directory, **kw
+        )
+        httpd = http.server.ThreadingHTTPServer(('127.0.0.1', port), handler_cls)
+    except OSError as e:
+        print('Nepodarilo sa spustit lokalny HTTP server na porte {}: {}'.format(port, e))
+        return False
+
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    _viewer_http_server_started = True
+    print('Lokalny HTTP server spusteny: http://localhost:{}/  (servuje {})'.format(port, directory))
+    return True
+
+
 def _get_email():
     return 'jangrexa' + chr(64) + 'gmail.com'
 
@@ -313,6 +363,7 @@ class LidarWorker(QThread):
                     gv_path = os.path.join(OUT_DIR, safe + '_geometry_viewer.html')
                     generate_geometry_viewer(json_path, jpg, gv_path)
                     result['files']['geometry_viewer'] = gv_path
+                    ensure_viewer_http_server()
                     webbrowser.open("http://localhost:8080/" + os.path.basename(gv_path))
                 except Exception as ve:
                     self.log.emit('  Geometry viewer: ' + str(ve))
@@ -329,6 +380,7 @@ class LidarWorker(QThread):
                 result['files']['smooth_obj'] = viewer_result['smooth_obj']
                 result['dimensions'] = viewer_result['dimensions']
                 url = 'file:///' + viewer_html.replace(chr(92), '/')
+                ensure_viewer_http_server()
                 webbrowser.open("http://localhost:8080/" + os.path.basename(gv_path))
         except Exception as e:
             self.log.emit('  Viewer: ' + str(e))
@@ -404,52 +456,67 @@ class LidarDialog(QDialog):
 
 
     def _trimesh_split(self):
-        """Run Trimesh face-normal clustering on existing PLY mesh."""
+        """Run EXACT plane-intersection roof reconstruction on existing mesh.
+
+        POZNAMKA (Claude fix): povodne tu bol mesh_to_roof_planes() zo
+        starej trimesh_roof_splitter.py (fragmentovane 'f' hrany, chybajuce
+        uzlabie) + generate_geometry_viewer() ktory navyse ocakaval iny
+        format hran (v1/v2 indexy) nez co splitter produkoval - dvojita
+        nezhoda. Teraz sa pouziva exact_roof_planes.py: RANSAC + presny
+        priesecnik rovin (Sutherland-Hodgman orezanie), rovnaky princip
+        ako manualna rekonstrukcia v Blenderi, len cisto v Pythone.
+        """
         self.lg.clear()
-        self.lg.append('Trimesh Face-Normal Split...')
+        self.lg.append('Exact Plane-Intersection Split...')
         self.tmesh_btn.setEnabled(False)
         try:
             import glob, json, os
-            from app.plugins.trimesh_roof_splitter import mesh_to_roof_planes
-            from app.plugins.geometry_viewer import generate_geometry_viewer
-            
-            # Find PLY mesh
-            ply_files = glob.glob(os.path.join(OUT_DIR, '*smooth.ply'))
-            if not ply_files:
-                ply_files = [f for f in glob.glob(os.path.join(OUT_DIR, '*.ply')) if 'viewer' not in f and '_topo' not in f]
-            if not ply_files:
-                self.lg.append('No PLY mesh found. Run GO first.')
+            from app.plugins.exact_roof_planes import mesh_to_roof_planes_exact, write_exact_viewer_html
+
+            # Find mesh (OBJ alebo PLY - mesh_to_roof_planes_exact zvladne oboje cez trimesh)
+            mesh_files = glob.glob(os.path.join(OUT_DIR, '*smooth.ply'))
+            if not mesh_files:
+                mesh_files = [f for f in glob.glob(os.path.join(OUT_DIR, '*.ply')) if 'viewer' not in f and '_topo' not in f]
+            if not mesh_files:
+                mesh_files = [f for f in glob.glob(os.path.join(OUT_DIR, '*.obj')) if 'viewer' not in f]
+            if not mesh_files:
+                self.lg.append('No mesh (PLY/OBJ) found. Run GO first.')
                 self.tmesh_btn.setEnabled(True)
                 return
-            
-            ply_path = max(ply_files, key=os.path.getmtime)
-            self.lg.append('Mesh: {}'.format(os.path.basename(ply_path)))
-            
-            # Run face-normal clustering
-            planes = mesh_to_roof_planes(ply_path)
-            self.lg.append('Roof planes found: {}'.format(len(planes)))
-            
+
+            mesh_path = max(mesh_files, key=os.path.getmtime)
+            self.lg.append('Mesh: {}'.format(os.path.basename(mesh_path)))
+
+            # Presna RANSAC + priesecnikova rekonstrukcia (nahradza face-normal split)
+            planes = mesh_to_roof_planes_exact(mesh_path)
+            n_low_conf = sum(1 for p in planes if p.get('low_confidence'))
+            self.lg.append('Roof planes found: {} ({} low-confidence, skontroluj rucne)'.format(
+                len(planes), n_low_conf))
+
             yolo_addr = self.inp.text().strip() or 'Atriova'
             safe = '_'.join(yolo_addr.replace(',','').replace('/','_').split()[:3])
             safe = ''.join(c for c in safe if c.isalnum() or c in '_- ').strip().replace(' ', '_')
-            
+
             total_area = 0
             for p in planes:
                 total_area += p['area_m2']
-                self.lg.append('  {} a={:.1f}m2 p={:.1f}deg f={} e={}'.format(
-                    p['id'], p['area_m2'], p['pitch_deg'], p['n_faces'], len(p['edges'])))
+                n_exact = sum(1 for e in p.get('edges', []) if e.get('exact'))
+                flag = ' [LOW CONFIDENCE]' if p.get('low_confidence') else ''
+                self.lg.append('  {} a={:.1f}m2 p={:.1f}deg e={} (exact={}){}'.format(
+                    p['id'], p['area_m2'], p['pitch_deg'], len(p.get('edges', [])), n_exact, flag))
             self.lg.append('Total: {:.1f}m2'.format(total_area))
-            
+
             # Save JSON
-            result = {'planes': planes, 'address': yolo_addr, 'total_area_m2': round(total_area,2)}
-            json_path = os.path.join(OUT_DIR, safe + '_trimesh.json')
+            result = {'planes': planes, 'address': yolo_addr, 'total_area_m2': round(total_area, 2)}
+            json_path = os.path.join(OUT_DIR, safe + '_exact.json')
             with open(json_path, 'w', encoding='utf-8') as jf:
                 json.dump(result, jf, indent=2, ensure_ascii=False, default=str)
-            
-            # Generate viewer
-            jpg = glob.glob(os.path.join(OUT_DIR, '*ortofoto*.jpg'))
-            gv_path = os.path.join(OUT_DIR, safe + '_trimesh_viewer.html')
-            generate_geometry_viewer(json_path, jpg[0] if jpg else None, gv_path)
+
+            # Generate viewer (rovnaka sablona ako _triov_v9_viewer.html,
+            # priamo start/end suradnice - ziadna v1/v2 index nezhoda)
+            gv_path = os.path.join(OUT_DIR, safe + '_exact_viewer.html')
+            write_exact_viewer_html(planes, yolo_addr, gv_path)
+            ensure_viewer_http_server()
             webbrowser.open("http://localhost:8080/" + os.path.basename(gv_path))
             self.lg.append('')
             self.lg.append('Opened: {} ({} planes, {:.1f}m2)'.format(os.path.basename(gv_path), len(planes), total_area))
