@@ -378,6 +378,50 @@ def mesh_to_roof_planes_exact(
             poly = clipped if len(clipped) >= 3 else poly
         final_polys[idx] = poly
 
+    # --- SNAP okapovych vrcholov (Claude fix v3) ---
+    # Orezanie vyssie rieši len hrany, kde ma rovina OVERENEHO suseda
+    # (hreben/narozie/uzlabie). Okapove vrcholy (kde strecha jednoducho
+    # konci, ziadny sused na orez) ostavaju z povodneho NEZAVISLE fitovaneho
+    # hranicneho polygonu kazdej roviny - a keďze kazda rovina sa fituje
+    # samostatne z vlastneho mraku bodov, ten isty fyzicky roh budovy moze
+    # vyjst v dvoch susednych rovinach o kus ineho posunuty (mm az niekolko
+    # desiatok cm, niekedy viac). Vysledok: viditelne medzery ("hrany nie su
+    # spojene"). Rieseние: sparuj a zlep (priemer) vrcholy z ROZNYCH rovin,
+    # ktore su blizko seba - to iste co funguje manualne v Blenderi.
+    EAVE_SNAP_TOL = 1.5  # metrov - max vzdialenost na sparovanie
+
+    all_eave_verts = []  # (plane_idx, vert_idx, coord)
+    for idx in good_idx:
+        for vi, v in enumerate(final_polys[idx]):
+            all_eave_verts.append([idx, vi, np.array(v, dtype=float)])
+
+    n_ev = len(all_eave_verts)
+    merged_flag = [False] * n_ev
+    snap_count = 0
+    for a in range(n_ev):
+        if merged_flag[a]:
+            continue
+        pa, va, ca = all_eave_verts[a]
+        cluster = [a]
+        for b in range(a + 1, n_ev):
+            if merged_flag[b]:
+                continue
+            pb, vb, cb = all_eave_verts[b]
+            if pb == pa:
+                continue  # len ROZNE roviny
+            if np.linalg.norm(ca - cb) < EAVE_SNAP_TOL:
+                cluster.append(b)
+        if len(cluster) > 1:
+            avg = np.mean([all_eave_verts[k][2] for k in cluster], axis=0)
+            for k in cluster:
+                pk, vk, _ = all_eave_verts[k]
+                final_polys[pk][vk] = tuple(avg)
+                merged_flag[k] = True
+            snap_count += 1
+
+    if snap_count:
+        logger.info("exact_roof_planes: sparovanych/zlepenych %d okapovych vrcholov", snap_count)
+
     # --- klasifikacia hran ---
     # najprv oznac ktore hrany kazdej roviny su "exact" (vysledok orezania susedom)
     # tym, ze skontrolujeme, ci lezia blizko niektoreho zdielaneho priesecnika

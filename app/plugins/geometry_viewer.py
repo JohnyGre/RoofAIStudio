@@ -44,7 +44,7 @@ def generate_geometry_viewer(geometry_json_path, orthophoto_path, output_path):
     
     # Orthophoto as base64
     ortho_b64 = ''
-    if os.path.exists(orthophoto_path):
+    if orthophoto_path and os.path.exists(orthophoto_path):
         with open(orthophoto_path, 'rb') as f:
             ortho_b64 = base64.b64encode(f.read()).decode()
     

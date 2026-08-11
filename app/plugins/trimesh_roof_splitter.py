@@ -13,7 +13,7 @@ from scipy.spatial import ConvexHull
 
 Z_TOL = 0.25        # tolerance for "horizontal" edge (m)
 ANGLE_TOL = 30.0     # degrees for colinear merge
-EDGE_NEAR = 0.5     # m - edges closer than this are neighbors
+EDGE_NEAR = 1.5     # m - edges closer than this are neighbors
 
 def _simplify_edge_points(points_3d, max_verts=8):
     """DP simplification to get max_verts key corners."""
@@ -38,7 +38,7 @@ def _simplify_edge_points(points_3d, max_verts=8):
         result.append(pts[np.argmin(dists)])
     return np.array(result)
 
-def _fix_roof_topology(planes, snap_distance=0.6, z_tolerance=0.3):
+def _fix_roof_topology(planes, snap_distance=1.5, z_tolerance=0.3):
     """Snap nearby 'f' edges between planes -> narozie/uzlabie. Fix false 'o' near ridge."""
     from scipy.spatial import KDTree
     
@@ -390,7 +390,7 @@ def mesh_to_roof_planes(ply_path, min_slope=10, max_slope=85, min_faces=50):
     _classify_edges(planes)
     
     # Fix topology + expand + reclassify by angle from eave
-    _fix_roof_topology(planes, snap_distance=0.8)
+    _fix_roof_topology(planes)
 
     
     # Clean up internal fields
@@ -518,7 +518,7 @@ def mesh_to_roof_planes(ply_path, min_slope=10, max_slope=85, min_faces=50):
     _classify_edges(planes)
     
     # Fix topology + expand + reclassify by angle from eave
-    _fix_roof_topology(planes, snap_distance=0.8)
+    _fix_roof_topology(planes)
 
     
     # Clean up internal fields
