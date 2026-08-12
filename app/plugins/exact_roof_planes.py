@@ -37,6 +37,9 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import cv2
 from scipy.spatial import ConvexHull
+from scipy.spatial import cKDTree
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import connected_components
 
 logger = logging.getLogger("Roof AI Studio")
 
@@ -99,6 +102,54 @@ def _multi_plane_ransac(points, distance_threshold=0.06, min_inliers=200, max_pl
         global_idx = remaining_idx[inl_local]
         raw_planes.append({"normal": normal, "d": d, "point_idx": global_idx})
         remaining_idx = np.delete(remaining_idx, inl_local)
+
+
+    # --- Connected components split ---
+    # RANSAC moze zlepit 2 priestorovo oddelene plochy s rovnakym sklonom
+    # (napr. dve rovne casti strechy na opacnych stranach budovy).
+    # Ak rovina obsahuje 2+ signifikantne zhluky, rozdel ju na samostatne roviny.
+    SPLIT_MIN_FRACTION = 0.05  # min 5% bodov zhluku musi byt, aby bol signifikantny
+    SPLIT_MIN_POINTS = 50
+    split_planes = []
+    for p in raw_planes:
+        pts3d = points[p["point_idx"]]
+        n = len(pts3d)
+        tree = cKDTree(pts3d)
+        dists, _ = tree.query(pts3d, k=min(n, 2))
+        if n < 2:
+            split_planes.append(p)
+            continue
+        typical_spacing = float(np.median(dists[:, 1]))
+        radius = typical_spacing * 3.0
+        pairs = tree.query_pairs(radius, output_type="ndarray")
+        if len(pairs) == 0:
+            split_planes.append(p)
+            continue
+        row, col = pairs[:, 0], pairs[:, 1]
+        graph = csr_matrix((np.ones(len(row)), (row, col)), shape=(n, n))
+        n_comp, labels = connected_components(graph, directed=False)
+        if n_comp <= 1:
+            split_planes.append(p)
+            continue
+        # Rozdel na samostatne roviny
+        sizes = [(int(np.sum(labels == c)), c) for c in range(n_comp)]
+        sizes.sort(reverse=True)
+        significant = [(sz, c) for sz, c in sizes if sz >= SPLIT_MIN_POINTS and sz >= n * SPLIT_MIN_FRACTION]
+        if len(significant) <= 1:
+            # Iba jeden velky zhluk + noise -> nechaj ako je
+            split_planes.append(p)
+            continue
+        logger.info(
+            "exact_roof_planes: rovina rozdelena na %d suvisle casti (rozdelene na samostatne roviny)",
+            len(significant),
+        )
+        for sz, c in significant:
+            new_p = dict(p)
+            new_p["point_idx"] = p["point_idx"][labels == c]
+            new_p["_split_from"] = True
+            split_planes.append(new_p)
+    raw_planes = split_planes
+
 
     # over hustotu bodov (plocha_hull / n_bodov) - vyrad podozrive riedke roviny
     densities = []
