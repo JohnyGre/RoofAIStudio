@@ -187,7 +187,7 @@ def clip_polygon_by_plane(polygon, plane_point, plane_normal, keep_positive=True
     return output
 
 
-def _confirmed_adjacent_planes(points, raw_planes, near_tol=0.35, min_near_points=15, min_length_m=1.0):
+def _confirmed_adjacent_planes(points, raw_planes, near_tol=0.50, min_near_points=8, min_length_m=2.0):
     """Over susednost cez presny priesecnik rovin + overenie bodmi oboch mrakov."""
     pairs = {}
     n_planes = len(raw_planes)
@@ -272,6 +272,7 @@ def mesh_to_roof_planes_exact(
     min_inliers: int = 200,
     max_planes: int = 15,
     polygon_epsilon: float = 0.02,
+    eave_snap_tol: float = 2.5,
 ) -> List[dict]:
     """
     Hlavny vstupny bod - nahrada za trimesh_roof_splitter.mesh_to_roof_planes.
@@ -346,34 +347,30 @@ def mesh_to_roof_planes_exact(
         for nb in neighbors[idx]:
             q_normal, q_d = raw_planes[nb]["normal"], raw_planes[nb]["d"]
             q_centroid = raw_planes[nb]["_centroid"]
-            side_val = np.dot(my_centroid - q_centroid, q_normal)
-            keep_positive = side_val > 0
-
+            # Fix: skus OBE strany orezu, vyber tu s vacsou plochou.
+            # side_val zlyhava pre vnutorne roviny (R3) kde centroid je na opacnej strane.
             area_before = _polygon_area_3d(poly, raw_planes[idx]["normal"])
-            clipped = clip_polygon_by_plane(poly, q_centroid, q_normal, keep_positive=keep_positive)
-            area_after = _polygon_area_3d(clipped, raw_planes[idx]["normal"]) if len(clipped) >= 3 else 0.0
+            clipped_pos = clip_polygon_by_plane(poly, q_centroid, q_normal, keep_positive=True)
+            clipped_neg = clip_polygon_by_plane(poly, q_centroid, q_normal, keep_positive=False)
+            area_pos = _polygon_area_3d(clipped_pos, raw_planes[idx]["normal"]) if len(clipped_pos) >= 3 else 0.0
+            area_neg = _polygon_area_3d(clipped_neg, raw_planes[idx]["normal"]) if len(clipped_neg) >= 3 else 0.0
 
+            if area_pos >= area_neg:
+                clipped = clipped_pos
+                area_after = area_pos
+            else:
+                clipped = clipped_neg
+                area_after = area_neg
+
+            # POISTKA: obe strany < MIN_RETAINED => preskoc (false adjacency)
             if area_before > 1e-6 and (area_after / area_before) < MIN_RETAINED_AREA_FRACTION:
-                # skus opacnu stranu - ak je vysledok rozumnejsi, pouzi ju
-                clipped_flip = clip_polygon_by_plane(poly, q_centroid, q_normal, keep_positive=not keep_positive)
-                area_flip = _polygon_area_3d(clipped_flip, raw_planes[idx]["normal"]) if len(clipped_flip) >= 3 else 0.0
-                if area_flip > area_after:
-                    logger.warning(
-                        "exact_roof_planes: orez P%d oproti P%d odstranil %.0f%% plochy "
-                        "(podozrive) - pouzita opacna strana (zachovanych %.0f%% miesto %.0f%%)",
-                        idx, nb, 100 * (1 - area_after / area_before),
-                        100 * area_flip / area_before, 100 * area_after / area_before,
-                    )
-                    clipped = clipped_flip
-                    area_after = area_flip
-                else:
-                    logger.warning(
-                        "exact_roof_planes: orez P%d oproti P%d odstranil %.0f%% plochy "
-                        "(podozrive), opacna strana nebola lepsia - orez PRESKOCENY "
-                        "(tento konkretny sused sa neaplikoval, ostatne susedne orezy pokracuju)",
-                        idx, nb, 100 * (1 - area_after / area_before),
-                    )
-                    clipped = poly  # preskoc tento orez, nechaj povodny poly
+                logger.warning(
+                    "exact_roof_planes: orez P%d oproti P%d odstranil %.0f%% plochy "
+                    "(obe strany < %.0f%%) - orez PRESKOCENY",
+                    idx, nb, 100 * (1 - area_after / area_before),
+                    100 * MIN_RETAINED_AREA_FRACTION,
+                )
+                clipped = poly  # preskoc tento orez, nechaj povodny poly
 
             poly = clipped if len(clipped) >= 3 else poly
         final_polys[idx] = poly
@@ -449,7 +446,7 @@ def mesh_to_roof_planes_exact(
                 rel = np.array(mid) - pi["point"]
                 t = rel @ pi["direction"]
                 perp = rel - t * pi["direction"]
-                if np.linalg.norm(perp) < 0.25 and pi["t_lo"] - 0.5 <= t <= pi["t_hi"] + 0.5:
+                if np.linalg.norm(perp) < 0.30 or (np.linalg.norm(perp) < 0.60 and pi["t_lo"] - 0.5 <= t <= pi["t_hi"] + 0.5):
                     kind, z_var = _dihedral_type(pi, raw_planes[idx], raw_planes[nb])
                     edge_type = kind
                     is_exact = True
