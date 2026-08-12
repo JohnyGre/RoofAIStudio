@@ -86,7 +86,8 @@ def _ransac_plane(points, distance_threshold=0.06, num_iterations=600, min_inlie
 
 
 def _multi_plane_ransac(points, distance_threshold=0.06, min_inliers=200, max_planes=15,
-                         min_normal_z=0.15, density_outlier_factor=3.0):
+                         min_normal_z=0.15, density_outlier_factor=3.0,
+                         flat_roof_max_degree=8.0):
     """Multi-plane RANSAC s filtrom na 'strechovite' roviny + odfiltrovaním
     podozrivo riedkych (nizka hustota bodov = pravdepodobne zla) rovin."""
     remaining_idx = np.arange(len(points))
@@ -160,10 +161,18 @@ def _multi_plane_ransac(points, distance_threshold=0.06, min_inliers=200, max_pl
         densities.append(density)
         p["_density"] = density
 
+    # oznac ploche strechy (sklon < flat_roof_max_degree) - nie low_confidence
+    # Ploche strechy maju prirodzene vyssiu density (menej bodov na vacsej ploche
+    # kvoly kolmemu dopadu lasera na takmer vodorovnu plochu)
+    for p in raw_planes:
+        slope_deg = float(np.degrees(np.arccos(np.clip(abs(p["normal"][2]), -1, 1))))
+        p["_is_flat"] = slope_deg < flat_roof_max_degree
+
     if densities:
         med = float(np.median(densities))
         for p in raw_planes:
-            p["_low_confidence"] = p["_density"] > med * density_outlier_factor
+            if not p.get("_is_flat"):
+                p["_low_confidence"] = p["_density"] > med * density_outlier_factor
 
     return raw_planes
 
@@ -324,6 +333,7 @@ def mesh_to_roof_planes_exact(
     max_planes: int = 15,
     polygon_epsilon: float = 0.02,
     eave_snap_tol: float = 2.5,
+    flat_roof_max_degree: float = 8.0,
 ) -> List[dict]:
     """
     Hlavny vstupny bod - nahrada za trimesh_roof_splitter.mesh_to_roof_planes.
@@ -350,6 +360,7 @@ def mesh_to_roof_planes_exact(
     raw_planes = _multi_plane_ransac(
         points, distance_threshold=distance_threshold,
         min_inliers=min_inliers, max_planes=max_planes,
+        flat_roof_max_degree=flat_roof_max_degree,
     )
     logger.info("exact_roof_planes: RANSAC nasiel %d rovin", len(raw_planes))
 
@@ -524,7 +535,7 @@ def mesh_to_roof_planes_exact(
 
         planes_out.append({
             "id": f"R{out_i+1}",
-            "type": "sedlova" if 15 <= slope <= 45 else "valbova",
+            "type": ("plochá" if slope < flat_roof_max_degree else "sedlová" if 15 <= slope <= 45 else "valbová"),
             "area_m2": round(float(area), 2),
             "pitch_deg": round(slope, 1),
             "vertices": [[round(v, 3) for v in p] for p in poly],
@@ -643,3 +654,4 @@ def write_exact_viewer_html(
             "z 3D zobrazenia (nemaju vertices/edges)", n_low
         )
     return output_path
+
