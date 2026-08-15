@@ -1,53 +1,12 @@
+# AI modely (lokalne - velke subory, GitHub limit 100MB)
+ai_models/
+
 # Python
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.Python
-env/
 .venv/
 venv/
-*.egg-info/
-.tox/
-.coverage
-.pytest_cache/
 
-# IDE
-.idea/
-.vscode/
-*.iml
-*.ipr
-*.iws
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Database
-*.sqlite
-*.db
-*.db-*
-
-# Logs
-logs/
-*.log
-
-# Backup files
-*.bak
-*.backup*
-
-# Build artifacts
-dist/
-build/
-
-# Data
+# Dáta a výsledky
 data/
-projects/
-# AI Models & Training artifacts
-*.pt
-*.pth
-runs/
-ai_models/
-
-# Reports
-COPILOT_SCENE_REPORT.md
+output/
