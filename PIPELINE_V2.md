@@ -8,57 +8,6 @@
 
 ---
 
-## 0.5 Sériová linka (pipeline) — princíp
-
-Systém funguje ako **sériová linka**: výstup jedného modulu = priamy vstup pre ďalší.
-Kľúč k úspechu: správne zladenie **2D vizuálnych dát** (ortofoto) a **3D priestorových dát** (LiDAR).
-
-```
-Adresa/GPS → 1. Data Ingestion → 2. 2D Segmentácia → 3. 3D Filtrovanie → 4. Roviny → 5. Topológia → 6. Export
-```
-
-| Fáza | Názov | Vstup → Výstup | Knižnica |
-|---|---|---|---|
-| 1 | **Data Ingestion & Localization** | Adresa → BBox 50×50 m + ortofoto + LAZ | Nominatim, pyproj, PDAL |
-| 2 | **2D Semantic Segmentation** | Ortofoto → strešný footprint polygón | YOLO/Detectron2, Shapely |
-| 3 | **3D Spatial Filtering** | Maska + LAZ → mračno len strechy | laspy, Open3D |
-| 4 | **Plane Fitting** | Mračno → matematické roviny | Open3D/PCL RANSAC |
-| 5 | **Topological Reconstruction** | Roviny → vodotesný mesh | Trimesh |
-| 6 | **Analytics & Export** | Mesh → metriky + JSON/OBJ/GLTF | Trimesh, numpy |
-
-**Zladenie 2D↔3D:**
-- 2D ortofoto dáva **hranice strechy** (footprint, odkvapy) — kde strecha končí.
-- 3D LiDAR dáva **výšky, sklony, roviny, hrebene** — geometriu v priestore.
-- Footprint z kroku 2 sa premieta ako **vertikálny valec** na 3D mračno (orezanie).
-
----
-
-## 0.7 Riziká a limity (Hard Truths)
-
-| Riziko | Popis | Riešenie |
-|---|---|---|
-| **Časový posun (Temporal Misalignment)** | Ortofoto z 2024, LiDAR z 2019 — prestavaná strecha sa nezhoduje | Metadata check: porovnať timestampy zdrojov pred analýzou |
-| **LiDAR absorpcia (mŕtve zóny)** | Čierne/lesklé/sklené povrchy neodrážajú laser → diery v mračne | Plocha sa počíta z matematických hraníc polygónu, NIE z počtu bodov |
-| **Previsy vegetácie** | Vetva nad strechou klasifikovaná ako trieda 6 (budova) | Surface roughness: strecha = hladká rovina, strom = vysoká variancia normál |
-| **Licencovanie AI modelov** | YOLOv8 = AGPL-3.0 → nutnosť zverejniť zdrojový kód | Pre komerčné nasadenie: YOLOX / Mask R-CNN (Apache-2.0/MIT); pre osobný projekt YOLOv8 OK |
-| **RAM overload pri LAZ** | Veľké .laz súbory (stovky MB) | PDAL streaming (číta po chunkoch), nie celý súbor naraz |
-
----
-
-## 0.8 Odporúčaný Open-Source Tech Stack (doplnené o Gemini návrh)
-
-| Modul | Úloha | Preferovaná knižnica |
-|---|---|---|
-| Data Fetch & Crop | Streamovanie a orez .laz bez RAM overloadu | **PDAL** |
-| Coordinate Transform | GPS (WGS84) → S-JTSK, správa projekcií | **pyproj** |
-| 2D Segmentation | Detekcia obrysu strechy z ortofotomapy | YOLO / Detectron2 |
-| 2D Geometry | Masky, footprinty, boolean operácie | **Shapely** |
-| 3D Point Cloud | RANSAC, denoising, normály | **Open3D** alebo PCL |
-| 3D Mesh & Topology | Prieniky rovín, triangulácia, export .obj | **Trimesh** |
-| LAZ načítanie | .laz → numpy body | laspy + lazrs |
-
----
-
 ## 0. Princíp: Open-source platformy
 
 **Všetko čo sa dá, berieme hotové z open-source platform** — nevynálezame koleso:
@@ -423,53 +372,47 @@ with sync_playwright() as p:
 
 ---
 
-## 10. Navrhovaný postup (prvý beh, poradie prác)
-
-### Fáza A — Príprava (30 min)
-1. Vytvoriť adresárovú štruktúru (kapitola 3) v `RoofAIStudio/`.
-2. `py -m venv .venv` + `requirements.txt` (trimesh, numpy, scipy, shapely, alphashape, opencv, pillow, laspy, lazrs, ultralytics, playwright, PySide6, **pyproj**, **open3d**, **pdal**).
-3. Skopírovať predtrénovaný model `ai_models/roof_gmaps_v2_last.pt` ako baseline.
-
-### Fáza B — Kroky 1-2 (Data Ingestion) ✅ prvý míľnik
-4. `app/core/geocode.py` — adresa → GPS (Nominatim + cache).
-5. `app/core/ortho_fetch.py` — ZBGIS WMS ortofoto 80×80 m (4096 px) + OSM fallback.
-6. `app/core/transform.py` — GPS (WGS84) → S-JTSK (pyproj) pre LAZ vyhľadávanie.
-7. **Test:** Átriová 9309/16 → GPS + ortofoto uložené v `data/ortho/`. ✅
-
-### Fáza C — Krok 4 (LiDAR)
-8. `app/core/laz_download.py` — nájsť + stiahnuť LAZ tile podľa S-JTSK súradníc.
-9. `app/core/pointcloud.py` — laspy načítanie, class filter (2=terén, 6=budova), voxel downsample, SOR denoising.
-10. **Test:** mračno budovy z ÁtrioVEJ v `data/laz/`. ✅
-
-### Fáza D — Kroky 3+4 (2D segmentácia + roviny)
-11. `app/ai/yolo.py` — YOLO segmentácia ortofota → maska + footprint (Shapely polygón).
-12. `app/core/segmentation.py` — RANSAC + CC split + ploché strechy (<8°).
-13. **Test:** 8-10 rovín pre Átriovú. ✅
-
-### Fáza E — Kroky 5-6 (Topológia + Export)
-14. `app/core/polygons.py` — alpha shape, DP simplifikácia, both-side clipping.
-15. `app/core/edges.py` — klasifikácia hrán (dihedrálny uhol).
-16. `app/core/export.py` — JSON, OBJ, PLY, HTML viewer, top-down PNG.
-17. **Test:** kompletný výstup pre Átriovú. ✅
-
-### Fáza F — GUI + QA
-18. `app/ui/main_window.py` — PySide6 okno, tlačidlá pre kroky, 3D viewer.
-19. `tools/qa.py` — automatické kontroly (gaps, edges, areas, flat).
-20. **Test:** celý pipeline cez GUI. ✅
-
----
-
-## 11. Čo NIE robiť (antivzory z v1)
-- Nehromadiť experimenty v `.cluster/task/` — každý modul má svoje miesto.
-- Nepoužívať ConvexHull na tvary — alpha shape.
-- Nespúšťať Blender/MeshLab/QGIS — všetko v appke/browseri.
-- Neprepisovať fungujúci kód naslepo — najprv test, potom zmena.
-- Neukladať heslá do kódu — `os.getenv()`.
-- Nevyhadzovať ploché strechy density filtrom.
-
----
-
 ## 9. Prvý beh (checklist)
+
+---
+
+## 12. PROGRESS (2026-08-15)
+
+### Fáza A ✅ — Štruktúra + geokódovanie
+- `app/core/geocode.py`: Nominatim → WGS84 → pyproj → EPSG:5514 (S-JTSK JTSK03)
+- `app/core/ortho_fetch.py`: ZBGIS WMS layer "1" (ortofoto) + OSM fallback
+- Test: Átriová 9309/16 → GPS 48.395436, 17.586068 → S-JTSK -535663.66, -1256478.28
+
+### Fáza B ✅ — Ortofoto
+- `data/ortho/Átriová_9309_16_Trnava_zbgis.jpg` (4096px, 1.06MB)
+
+### Fáza C ✅ — LiDAR (LAZ)
+- **MAPKA objednávka**: `tools/mapka_order.py` (Playwright) — adresa → Export údajov → Mračno bodov (MB1) → email
+- **Gmail monitoring**: `tools/gmail_monitor.py` (IMAP) — nájde email, stiahne ZIP, rozbalí LAZ
+- **Download**: `tools/mapka_download.py` — 6 LAZ súborov, 4.79M bodov, S-JTSK JTSK03+Bpv
+  - 3 súbory pokrývajú Átriovú (246985, 247065, 247070)
+  - Trieda 6 (budovy): 23.6k bodov; strecha Z 155.5-166m; terén 154.5m (sedí s DMR 154.53)
+- **Čistenie**: `app/core/pointcloud.py` — class filter (6=budovy) + voxel downsample (0.3m) + SOR → 16.7k strešných bodov
+- **Separácia budov**: 2D connected components → 3 budovy v okruhu 40m; building_0 = Átriová 16H (25.8×27.3m)
+- **Segmentácia**: `app/plugins/exact_roof_planes.py` (obnovený z v1 + fixy) → 14 rovín
+  - 10 sedlových 30-31° (valbové časti) + 4 ploché (terasy), celkom 504 m² (bez low_conf)
+  - 1 low_conf (410 m²) — artefakt rozpadnutej roztrúsenej roviny
+
+### Fixy v exact_roof_planes (2026-08-15)
+1. **CC split**: SPLIT_MIN_POINTS 50→20, SPLIT_MIN_FRACTION 0.05→0.03 — malé ploché roviny (rímsy/terasy) sa správne oddelia
+2. **Density filter pre ploché roviny**: flat_factor = density_outlier_factor × 4 — vyradí artefakty (roztrúsené body na rovnakej výške, hustota <0.2 bodov/m²)
+
+### Zistenia
+- LAZ MB1 (2017-2022 cyklus) — jediný spôsob presných výšok (±5cm); objednávka trvá ~15 minút
+- Download link platí 24h — monitoring musí stiahnuť do tohto okna
+- Body z rôznych LAZ súborov sa prekrývajú → voxel downsample povinný
+- Ploché roviny s nízkou hustotou = artefakt (rímsy/parapety), nie reálna strecha
+
+### TODO
+- Fáza D: YOLO footprint (app/ai/yolo.py) + overlay na ortofoto
+- Fáza E: export OBJ/PLY + 3D viewer (funguje, ale WebGL2 headless nerenderuje)
+- Fáza F: GUI (PySide6) + QA nástroje
+- Overiť: hrany (odkvap/hrebeň/nárožie/úžľabie) na building_0
 
 - [ ] `git init` + nový branch `v2`
 - [ ] Vytvoriť adresárovú štruktúru (kapitola 3)
