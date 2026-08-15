@@ -1,0 +1,29 @@
+# RoofAIStudio v2 - dependencies
+# Core
+numpy
+scipy
+trimesh
+shapely
+alphashape
+opencv-python
+pillow
+
+# LiDAR / geodézia
+laspy[lazrs]
+pyproj
+pdal
+
+# AI
+ultralytics
+torch
+torchvision
+
+# GUI
+PySide6
+
+# Automatizácia
+playwright
+requests
+
+# Vývoj / testy
+pytest
