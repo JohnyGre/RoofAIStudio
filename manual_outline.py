@@ -261,7 +261,7 @@ def build_mesh_from_outline(outline, points, grid=0.4):
                 continue
             base = len(verts)
             for p in xy:
-                verts.append((p[0], p[1], coef[0]*p[0] + coef[1]*p[1] + coef[2]))
+                verts.append((float(p[0]), float(p[1]), float(coef[0]*p[0] + coef[1]*p[1] + coef[2])))
             coords2d = xy
             try:
                 tri = Delaunay(coords2d)
@@ -269,9 +269,9 @@ def build_mesh_from_outline(outline, points, grid=0.4):
                 for t in tri.simplices:
                     c = coords2d[t].mean(axis=0)
                     if shp.contains(Point(c)) or shp.boundary.distance(Point(c)) < 0.05:
-                        faces.append((base + t[0], base + t[1], base + t[2]))
+                        faces.append((int(base + t[0]), int(base + t[1]), int(base + t[2])))
             except Exception:
-                ci = len(verts); verts.append(tuple(np.mean(xy, axis=0)))
+                ci = len(verts); verts.append(tuple(float(x) for x in np.mean(xy, axis=0)))
                 for t in range(len(xy)):
                     faces.append((base + t, base + (t+1) % len(xy), ci))
             plane_areas.append({'slope': round(pl['slope'], 1), 'az': round(pl['az'], 1),
