@@ -250,7 +250,7 @@ def make_viewer_html(verts, faces, title, area_m2, plane_areas):
   renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(devicePixelRatio||1);
   document.body.appendChild(renderer.domElement);
   var positions = new Float32Array(V.length*3);
-  for (var i=0;i<V.length;i++){ positions[i*3]=V[i][0]-%CX%; positions[i*3+1]=V[i][1]-%CY%; positions[i*3+2]=V[i][2]-%CZ%; }
+  for (var i=0;i<V.length;i++){ positions[i*3]=V[i][0]-(%CX%); positions[i*3+1]=V[i][1]-(%CY%); positions[i*3+2]=V[i][2]-(%CZ%); }
   var geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions,3));
   var idx=[]; for (var j=0;j<F.length;j++){idx.push(F[j][0],F[j][1],F[j][2]);}
