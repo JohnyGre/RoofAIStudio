@@ -12,8 +12,8 @@ from shapely import concave_hull
 from scipy.spatial import Delaunay
 
 from PySide6.QtWidgets import (QDialog, QLabel, QVBoxLayout, QHBoxLayout, QPushButton,
-                               QMessageBox)
-from PySide6.QtCore import Qt, Signal
+                               QMessageBox, QScrollArea)
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QFont
 
 T52 = Transformer.from_crs('EPSG:4326', 'EPSG:8353', always_xy=True)
@@ -300,8 +300,8 @@ class OutlineCanvas(QLabel):
     def set_image(self, path):
         img = QImage(path)
         self._orig = img
-        # scale na šírku max 1000px
-        self._scale = min(1.0, 1000.0 / img.width())
+        # scale na šírku max 900px
+        self._scale = min(1.0, 900.0 / img.width())
         w = int(img.width() * self._scale)
         h = int(img.height() * self._scale)
         self._pixmap = QPixmap.fromImage(img.scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation))
@@ -353,16 +353,20 @@ class ManualOutlineDialog(QDialog):
         super().__init__(parent)
         self.meta = meta
         self.setWindowTitle('Naklikať obrys strechy')
-        self.setMinimumSize(400, 300)
+        self.resize(900, 740)
         lay = QVBoxLayout(self)
         hint = QLabel('ĽAVÉ tlačidlo = pridať roh obrysu (v smere hodinových ručičiek)  |  '
                       'PRAVÉ tlačidlo = zmazať posledný  |  Dokončiť = zatvoriť')
         hint.setWordWrap(True)
         hint.setStyleSheet('color:#ddd; font-size:12px;')
         lay.addWidget(hint)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(False)
+        self.scroll.setStyleSheet('QScrollArea { background:#111; border:1px solid #333; }')
         self.canvas = OutlineCanvas(meta)
         self.canvas.set_image(meta['path'])
-        lay.addWidget(self.canvas)
+        self.scroll.setWidget(self.canvas)
+        lay.addWidget(self.scroll, 1)
         btn = QHBoxLayout()
         self.clear_btn = QPushButton('Vyčistiť')
         self.clear_btn.clicked.connect(self._clear)
@@ -374,6 +378,13 @@ class ManualOutlineDialog(QDialog):
         btn.addWidget(self.done_btn)
         lay.addLayout(btn)
         self.outline = None
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # posun scroll na stred obrázka (kde je strecha)
+        QTimer.singleShot(50, lambda: self.scroll.ensureVisible(
+            int(self.canvas.width()/2), int(self.canvas.height()/2),
+            int(self.canvas.width()/2), int(self.canvas.height()/2)))
 
     def _clear(self):
         self.canvas.points_px.clear()
