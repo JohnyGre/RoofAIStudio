@@ -250,6 +250,37 @@ def build_mesh_from_outline(outline, points, grid=0.35):
             return
         coef = pl['coef']
         a3d = a2d / math.cos(math.radians(pl['slope']))
+        pts3d = np.column_stack([xy[:, 0], xy[:, 1], coef[0]*xy[:, 0] + coef[1]*xy[:, 1] + coef[2]])
+        z_pts = pl['pts'][:, 2]
+        zmin, zmax = float(z_pts.min()), float(z_pts.max())
+        # klasifikácia hrán + dĺžky
+        edges = []
+        kk = len(xy)
+        for t in range(kk):
+            A = pts3d[t]; B = pts3d[(t+1) % kk]
+            M = (A + B) / 2
+            length = float(np.linalg.norm(B - A))
+            dz_edge = abs(float(B[2] - A[2]))
+            on_outline = ob.boundary.distance(Point(M[0], M[1])) < 1.0
+            if not on_outline:
+                typ = 'h'
+                for o in main:
+                    if o is pl:
+                        continue
+                    d2 = np.min(np.hypot(o['pts'][:, 0]-M[0], o['pts'][:, 1]-M[1]))
+                    if d2 < 1.0:
+                        # len vodorovné zložky normál (zvislá ~0.7 by vždy dala kladný dot)
+                        dot_h = float(pl['n'][0]*o['n'][0] + pl['n'][1]*o['n'][1])
+                        typ = 'u' if dot_h > 0 else 'h'
+                        break
+            else:
+                if dz_edge > 0.3:
+                    typ = 'n'  # nárožie (šikmá obrysová hrana = valba)
+                else:
+                    zrel = (M[2] - zmin) / (zmax - zmin + 1e-9)
+                    typ = 'o' if zrel < 0.35 else 'f'
+            edges.append({'typ': typ, 'dlzka_m': round(length, 2)})
+        spadnica = (zmax - zmin) / math.sin(math.radians(pl['slope']))
         base = len(verts)
         for p in xy:
             verts.append((float(p[0]), float(p[1]), float(coef[0]*p[0] + coef[1]*p[1] + coef[2])))
@@ -265,7 +296,9 @@ def build_mesh_from_outline(outline, points, grid=0.35):
             for t in range(len(xy)):
                 faces.append((base + t, base + (t+1) % len(xy), ci))
         plane_areas.append({'slope': round(pl['slope'], 1), 'az': round(pl['az'], 1),
-                            'area_m2': round(a3d, 1), 'rmse_m': round(pl['rmse'], 4)})
+                            'area_m2': round(a3d, 1), 'rmse_m': round(pl['rmse'], 4),
+                            'hrany': edges, 'spadnica_m': round(spadnica, 2),
+                            'z_min': round(zmin, 2), 'z_max': round(zmax, 2)})
 
     # 1 rovina = 1 polygón (hull buniek roviny ∩ obrys) - žiadne fragmenty, žiadne zmiznuté
     for k, (h, pl) in enumerate(h2d):
@@ -277,7 +310,7 @@ def build_mesh_from_outline(outline, points, grid=0.35):
             ch = concave_hull(MultiPoint(cellpts), ratio=0.08)
             if ch.geom_type == 'MultiPolygon':
                 ch = max(ch.geoms, key=lambda g: g.area)
-            ch = ch.simplify(0.4, preserve_topology=True)
+            ch = ch.simplify(0.8, preserve_topology=True)
             ch = ch.intersection(ob)
             if ch.is_empty:
                 continue

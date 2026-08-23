@@ -778,7 +778,22 @@ class RoofAIWindow(QMainWindow):
         outline = result['outline']; meta = result['meta']
         self.log_output.append(f'\n=== Manuálny obrys: {total} m², {len(plane_areas)} rovín ===')
         for r in plane_areas:
-            self.log_output.append(f"  {r['slope']:.0f}°/{r['az']:.0f}°  {r['area_m2']} m²")
+            self.log_output.append(f"  {r['slope']:.0f}°/{r['az']:.0f}°  {r['area_m2']} m²  "
+                                   f"spádnica {r.get('spadnica_m','-')} m")
+        # súčtová tabuľka hrán
+        edge_names = {'h': 'hrebeň', 'o': 'odkvap', 'u': 'úžľabie', 'f': 'štít', 'n': 'nárožie'}
+        edge_totals = {}
+        for r in plane_areas:
+            for e in r.get('hrany', []):
+                edge_totals[e['typ']] = edge_totals.get(e['typ'], 0.0) + e['dlzka_m']
+        if edge_totals:
+            self.log_output.append('\nSúčtová tabuľka hrán:')
+            for t in ['h', 'o', 'u', 'f', 'n']:
+                if edge_totals.get(t, 0) > 0:
+                    self.log_output.append(f"  {edge_names[t]}: {edge_totals[t]:.1f} m")
+            zmax = max((r.get('z_max', 0) for r in plane_areas), default=0)
+            zmin = min((r.get('z_min', 9e9) for r in plane_areas), default=0)
+            self.log_output.append(f'  Výška strechy: {zmin:.2f}–{zmax:.2f} m n.m. (Δ {zmax-zmin:.2f} m)')
         # ulož mesh + viewer + 2D prekrytie
         base = os.path.join(OUT_DIR, 'manual_outline')
         try:
