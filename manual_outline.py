@@ -327,12 +327,55 @@ def build_mesh_from_outline(outline, points, grid=0.35):
                             'hrany': edges, 'spadnica_m': round(spadnica, 2),
                             'z_min': round(zmin, 2), 'z_max': round(zmax, 2)})
 
-    # pravidelné polygóny -> triangulácia + klasifikácia
+    # ---- snapovanie vrcholov (spojiť blízke rohy polygónov do spoločného bodu) ----
+    SNAP = 0.8
+    vtx = []
+    poly_vtx = []
     for poly, pl in results:
         coords = list(poly.exterior.coords)[:-1]
-        if len(coords) < 3:
+        idxs = []
+        for (x, y) in coords:
+            idxs.append(len(vtx))
+            vtx.append([x, y])
+        poly_vtx.append(idxs)
+    vtx = np.array(vtx)
+
+    if len(vtx) > 1:
+        tree = cKDTree(vtx)
+        parent = list(range(len(vtx)))
+
+        def find(a):
+            while parent[a] != a:
+                parent[a] = parent[parent[a]]
+                a = parent[a]
+            return a
+
+        for a, b in tree.query_pairs(SNAP):
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+        newpos = {}
+        for r in set(find(i) for i in range(len(vtx))):
+            members = [i for i in range(len(vtx)) if find(i) == r]
+            c = vtx[members].mean(axis=0)
+            for m in members:
+                newpos[m] = c
+        snapped_results = []
+        for (poly, pl), idxs in zip(results, poly_vtx):
+            pts = [tuple(newpos[i]) for i in idxs]
+            clean = []
+            for p in pts:
+                if not clean or np.hypot(clean[-1][0]-p[0], clean[-1][1]-p[1]) > 0.05:
+                    clean.append(p)
+            if len(clean) >= 3:
+                snapped_results.append((clean, pl))
+        results = snapped_results
+
+    # pravidelné polygóny -> triangulácia + klasifikácia
+    for pts, pl in results:
+        if len(pts) < 3:
             continue
-        emit(np.array(coords), pl)
+        emit(np.array(pts), pl)
 
     total = round(sum(p['area_m2'] for p in plane_areas), 1)
     return verts, faces, plane_areas, total
