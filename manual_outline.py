@@ -9,7 +9,7 @@ import cv2
 from pyproj import Transformer
 from shapely.geometry import Polygon as ShPolygon, Point, MultiPoint
 from shapely import concave_hull
-from scipy.spatial import Delaunay
+from scipy.spatial import Delaunay, cKDTree
 
 from PySide6.QtWidgets import (QDialog, QLabel, QVBoxLayout, QHBoxLayout, QPushButton,
                                QMessageBox, QScrollArea)
@@ -191,51 +191,78 @@ def build_mesh_from_outline(outline, points, grid=0.35):
         main = planes[:6]
     print(f'[manual] RANSAC {len(planes)} rovín -> {len(main)} hlavných')
 
-    # top-down grid obmedzený obrysom
-    xs, ys = pts[:, 0], pts[:, 1]
-    gx0, gy0 = xs.min() - 1, ys.min() - 1
-    gx1, gy1 = xs.max() + 1, ys.max() + 1
-    nx = int(math.ceil((gx1 - gx0) / grid)); ny = int(math.ceil((gy1 - gy0) / grid))
-    if nx > 250 or ny > 250:
-        grid = max((gx1-gx0)/250.0, (gy1-gy0)/250.0)
-        nx = int(math.ceil((gx1 - gx0) / grid)); ny = int(math.ceil((gy1 - gy0) / grid))
+    # ---- pravidelné polygóny: priesečníky rovín (zdieľané presné hrany) ----
+    for pl in main:
+        pl['d'] = float(np.mean(pl['pts'] @ pl['n']))
 
-    h2d = []
-    for k, pl in enumerate(main):
+    def intersect_2planes(n1, d1, n2, d2, c):
+        s = np.cross(n1, n2)
+        sl = np.linalg.norm(s)
+        if sl < 1e-9:
+            return None, None
+        s /= sl
+        A = np.vstack([n1, n2, s])
+        b = np.array([d1, d2, np.dot(s, c)])
         try:
-            h = concave_hull(MultiPoint(pl['pts'][:, :2]), ratio=0.05).simplify(0.35, preserve_topology=True)
-            if h.geom_type == 'MultiPolygon':
-                h = max(h.geoms, key=lambda g: g.area)
-            if h.geom_type == 'Polygon' and h.area > 2:
-                h2d.append((h, pl))
-        except Exception:
+            p = np.linalg.solve(A, b)
+        except np.linalg.LinAlgError:
+            return None, None
+        return p, s
+
+    def clip_halfplane(poly, p0, s2, side):
+        px0, py0 = float(p0[0]), float(p0[1])
+        sx, sy = float(s2[0]), float(s2[1])
+        nx, ny = -sy, sx
+        x0, y0, x1, y1 = poly.bounds
+        dd = max(x1-x0, y1-y0) * 40
+        off = 0.02 if side > 0 else -0.02
+        corners = [
+            (px0 - dd*sx + off*nx, py0 - dd*sy + off*ny),
+            (px0 + dd*sx + off*nx, py0 + dd*sy + off*ny),
+            (px0 + dd*sx + side*dd*nx, py0 + dd*sy + side*dd*ny),
+            (px0 - dd*sx + side*dd*nx, py0 - dd*sy + side*dd*ny),
+        ]
+        hp = ShPolygon(corners)
+        out = poly.intersection(hp)
+        if out.is_empty:
+            return None
+        if out.geom_type != 'Polygon':
+            geoms = [g for g in out.geoms if g.geom_type == 'Polygon']
+            if not geoms:
+                return None
+            out = max(geoms, key=lambda g: g.area)
+        return out
+
+    # pre každú rovinu: obrys orezaný priesečníkovými priamkami so susedmi
+    results = []
+    for i, pl in enumerate(main):
+        poly = ob
+        for j, pj in enumerate(main):
+            if i == j:
+                continue
+            d2 = cKDTree(pj['pts'][:, :2]).query(pl['pts'][:, :2], k=1)[0].min()
+            if d2 > 2.0:
+                continue
+            c = (np.mean(pl['pts'], axis=0) + np.mean(pj['pts'], axis=0)) / 2
+            p0, s = intersect_2planes(pl['n'], pl['d'], pj['n'], pj['d'], c)
+            if p0 is None:
+                continue
+            # priesečník musí byť blízko strechy
+            if np.hypot(p0[0]-ob_c[0], p0[1]-ob_c[1]) > 30:
+                continue
+            s2 = s[:2]; sl = np.linalg.norm(s2)
+            if sl < 1e-9:
+                continue
+            s2 /= sl
+            nn = np.array([-s2[1], s2[0]])
+            side_vals = (pl['pts'][:, :2] - p0[:2]) @ nn
+            side = 1 if np.median(side_vals) > 0 else -1
+            poly = clip_halfplane(poly, p0[:2], s2, side)
+            if poly is None:
+                break
+        if poly is None or poly.is_empty or poly.area < 0.5:
             continue
-
-    cx_g = gx0 + (np.arange(nx) + 0.5) * grid
-    cy_g = gy0 + (np.arange(ny) + 0.5) * grid
-    labels = np.full((ny, nx), -1, dtype=np.int16)
-    z_top = np.full((ny, nx), -np.inf)
-    for k, (h, pl) in enumerate(h2d):
-        bx0, by0, bx1, by1 = h.bounds
-        i0 = max(0, int((bx0-gx0)/grid)); i1 = min(nx, int((bx1-gx0)/grid)+1)
-        j0 = max(0, int((by0-gy0)/grid)); j1 = min(ny, int((by1-gy0)/grid)+1)
-        coef = pl['coef']
-        for j in range(j0, j1):
-            yy = cy_g[j]
-            for i in range(i0, i1):
-                xx = cx_g[i]
-                if h.contains(Point(xx, yy)):
-                    zz = coef[0]*xx + coef[1]*yy + coef[2]
-                    if zz > z_top[j, i]:
-                        z_top[j, i] = zz
-                        labels[j, i] = k
-
-    # obmedzenie naklikaným obrysom (presné hrany)
-    for j in range(ny):
-        yy = cy_g[j]
-        for i in range(nx):
-            if not ob.contains(Point(cx_g[i], yy)):
-                labels[j, i] = -1
+        results.append((poly, pl))
 
     verts, faces = [], []
     plane_areas = []
@@ -300,30 +327,12 @@ def build_mesh_from_outline(outline, points, grid=0.35):
                             'hrany': edges, 'spadnica_m': round(spadnica, 2),
                             'z_min': round(zmin, 2), 'z_max': round(zmax, 2)})
 
-    # 1 rovina = 1 polygón (hull buniek roviny ∩ obrys) - žiadne fragmenty, žiadne zmiznuté
-    for k, (h, pl) in enumerate(h2d):
-        cells = np.argwhere(labels == k)
-        if len(cells) < 3:
+    # pravidelné polygóny -> triangulácia + klasifikácia
+    for poly, pl in results:
+        coords = list(poly.exterior.coords)[:-1]
+        if len(coords) < 3:
             continue
-        cellpts = np.column_stack([gx0 + (cells[:, 1]+0.5)*grid, gy0 + (cells[:, 0]+0.5)*grid])
-        try:
-            ch = concave_hull(MultiPoint(cellpts), ratio=0.08)
-            if ch.geom_type == 'MultiPolygon':
-                ch = max(ch.geoms, key=lambda g: g.area)
-            ch = ch.simplify(0.8, preserve_topology=True)
-            ch = ch.intersection(ob)
-            if ch.is_empty:
-                continue
-            if ch.geom_type == 'MultiPolygon':
-                geoms = [g for g in ch.geoms if g.geom_type == 'Polygon']
-                if not geoms:
-                    continue
-                ch = max(geoms, key=lambda g: g.area)
-            if ch.geom_type != 'Polygon':
-                continue
-            emit(list(ch.exterior.coords)[:-1], pl)
-        except Exception:
-            continue
+        emit(np.array(coords), pl)
 
     total = round(sum(p['area_m2'] for p in plane_areas), 1)
     return verts, faces, plane_areas, total
