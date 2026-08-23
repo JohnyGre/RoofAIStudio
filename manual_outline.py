@@ -96,7 +96,7 @@ def fit_lsq(points):
     return n, coef, dists
 
 
-def ransac_plane(points, thresh=0.08, iters=1500, min_inl=200, seed=7):
+def ransac_plane(points, thresh=0.08, iters=1500, min_inl=100, seed=7):
     rng = np.random.default_rng(seed)
     best = None
     n = len(points)
@@ -162,7 +162,7 @@ def load_laz_points(lat, lon, radius=60):
 # ============================================================
 # Mesh z naklikaného obrysu + LiDAR rovín (top-down grid v obryse)
 # ============================================================
-def build_mesh_from_outline(outline, points, grid=0.4):
+def build_mesh_from_outline(outline, points, grid=0.35):
     """outline: list[(x,y) S-JTSK] obrys strechy. points: LiDAR body (N,3).
     Vráti (verts, faces, plane_areas, total)."""
     if points is None or len(points) < 200:
@@ -180,15 +180,16 @@ def build_mesh_from_outline(outline, points, grid=0.4):
     pts = pts[inc]
     if len(pts) < 200:
         return None, None, [], 0.0
-    # odrež terén (najnižšie 2 m strechy)
+    # odrež len skutočný terén (najnižšie 5%)
     z = pts[:, 2]
-    zcut = z.min() + (z.max() - z.min()) * 0.15
+    zcut = z.min() + (z.max() - z.min()) * 0.05
     pts = pts[pts[:, 2] > zcut]
 
     planes = extract_planes(pts)
-    main = [pl for pl in planes if pl['slope'] > 10 and pl['cnt'] > 150]
+    main = [pl for pl in planes if pl['slope'] > 4 and pl['cnt'] > 50]
     if not main:
-        main = planes[:4]
+        main = planes[:6]
+    print(f'[manual] RANSAC {len(planes)} rovín -> {len(main)} hlavných')
 
     # top-down grid obmedzený obrysom
     xs, ys = pts[:, 0], pts[:, 1]
@@ -205,7 +206,7 @@ def build_mesh_from_outline(outline, points, grid=0.4):
             h = concave_hull(MultiPoint(pl['pts'][:, :2]), ratio=0.05).simplify(0.35, preserve_topology=True)
             if h.geom_type == 'MultiPolygon':
                 h = max(h.geoms, key=lambda g: g.area)
-            if h.geom_type == 'Polygon' and h.area > 4:
+            if h.geom_type == 'Polygon' and h.area > 2:
                 h2d.append((h, pl))
         except Exception:
             continue
@@ -238,44 +239,59 @@ def build_mesh_from_outline(outline, points, grid=0.4):
 
     verts, faces = [], []
     plane_areas = []
+
+    def emit(xy, pl):
+        xy = np.asarray(xy, dtype=float)
+        if len(xy) < 3:
+            return
+        x2, y2 = xy[:, 0], xy[:, 1]
+        a2d = 0.5 * abs(np.dot(x2, np.roll(y2, -1)) - np.dot(y2, np.roll(x2, -1)))
+        if a2d < 0.5:
+            return
+        coef = pl['coef']
+        a3d = a2d / math.cos(math.radians(pl['slope']))
+        base = len(verts)
+        for p in xy:
+            verts.append((float(p[0]), float(p[1]), float(coef[0]*p[0] + coef[1]*p[1] + coef[2])))
+        try:
+            tri = Delaunay(xy)
+            shp = ShPolygon(xy)
+            for t in tri.simplices:
+                c = xy[t].mean(axis=0)
+                if shp.contains(Point(c)) or shp.boundary.distance(Point(c)) < 0.05:
+                    faces.append((int(base + t[0]), int(base + t[1]), int(base + t[2])))
+        except Exception:
+            ci = len(verts); verts.append(tuple(float(x) for x in np.mean(xy, axis=0)))
+            for t in range(len(xy)):
+                faces.append((base + t, base + (t+1) % len(xy), ci))
+        plane_areas.append({'slope': round(pl['slope'], 1), 'az': round(pl['az'], 1),
+                            'area_m2': round(a3d, 1), 'rmse_m': round(pl['rmse'], 4)})
+
+    # 1 rovina = 1 polygón (hull buniek roviny ∩ obrys) - žiadne fragmenty, žiadne zmiznuté
     for k, (h, pl) in enumerate(h2d):
-        mask = (labels == k).astype(np.uint8)
-        if mask.sum() == 0:
+        cells = np.argwhere(labels == k)
+        if len(cells) < 3:
             continue
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
-        cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in cnts:
-            if len(cnt) < 3:
+        cellpts = np.column_stack([gx0 + (cells[:, 1]+0.5)*grid, gy0 + (cells[:, 0]+0.5)*grid])
+        try:
+            ch = concave_hull(MultiPoint(cellpts), ratio=0.08)
+            if ch.geom_type == 'MultiPolygon':
+                ch = max(ch.geoms, key=lambda g: g.area)
+            ch = ch.simplify(0.4, preserve_topology=True)
+            ch = ch.intersection(ob)
+            if ch.is_empty:
                 continue
-            poly = cv2.approxPolyDP(cnt, 1.5, True)
-            pts2 = poly[:, 0, :].astype(float)
-            if len(pts2) < 3:
+            if ch.geom_type == 'MultiPolygon':
+                geoms = [g for g in ch.geoms if g.geom_type == 'Polygon']
+                if not geoms:
+                    continue
+                ch = max(geoms, key=lambda g: g.area)
+            if ch.geom_type != 'Polygon':
                 continue
-            coef = pl['coef']
-            xy = np.column_stack([gx0 + (pts2[:, 0]+0.5)*grid, gy0 + (pts2[:, 1]+0.5)*grid])
-            zz = coef[0]*xy[:, 0] + coef[1]*xy[:, 1] + coef[2]
-            x2, y2 = xy[:, 0], xy[:, 1]
-            a2d = 0.5 * abs(np.dot(x2, np.roll(y2, -1)) - np.dot(y2, np.roll(x2, -1)))
-            a3d = a2d / math.cos(math.radians(pl['slope']))
-            if a2d < 1.0:
-                continue
-            base = len(verts)
-            for p in xy:
-                verts.append((float(p[0]), float(p[1]), float(coef[0]*p[0] + coef[1]*p[1] + coef[2])))
-            coords2d = xy
-            try:
-                tri = Delaunay(coords2d)
-                shp = ShPolygon(coords2d)
-                for t in tri.simplices:
-                    c = coords2d[t].mean(axis=0)
-                    if shp.contains(Point(c)) or shp.boundary.distance(Point(c)) < 0.05:
-                        faces.append((int(base + t[0]), int(base + t[1]), int(base + t[2])))
-            except Exception:
-                ci = len(verts); verts.append(tuple(float(x) for x in np.mean(xy, axis=0)))
-                for t in range(len(xy)):
-                    faces.append((base + t, base + (t+1) % len(xy), ci))
-            plane_areas.append({'slope': round(pl['slope'], 1), 'az': round(pl['az'], 1),
-                                'area_m2': round(a3d, 1), 'rmse_m': round(pl['rmse'], 4)})
+            emit(list(ch.exterior.coords)[:-1], pl)
+        except Exception:
+            continue
+
     total = round(sum(p['area_m2'] for p in plane_areas), 1)
     return verts, faces, plane_areas, total
 
