@@ -250,6 +250,12 @@ def build_mesh_from_outline(outline, points, grid=0.35):
             # priesečník musí byť blízko strechy
             if np.hypot(p0[0]-ob_c[0], p0[1]-ob_c[1]) > 30:
                 continue
+            # KĽUČ: priesečníková priamka musí prechádzať blízko bodov OBOCH rovín
+            # (inak ide o „falošného suseda" a orezanie by zdecimovalo roviny)
+            d_i = float(np.linalg.norm(np.cross(pl['pts'] - p0, s), axis=1).min())
+            d_j = float(np.linalg.norm(np.cross(pj['pts'] - p0, s), axis=1).min())
+            if min(d_i, d_j) > 1.2:
+                continue
             s2 = s[:2]; sl = np.linalg.norm(s2)
             if sl < 1e-9:
                 continue
