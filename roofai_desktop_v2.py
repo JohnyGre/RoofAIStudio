@@ -330,11 +330,27 @@ class PipelineWorker(QThread):
             for i, pl in enumerate(planes):
                 self.log(f'    P{i+1}: {pl["slope"]:.1f}° / {pl["az"]:.0f}°  (RMSE {pl["rmse"]*100:.1f} cm, {pl["cnt"]} pts)')
 
-            self.log('\n--- [5/6] 3D mesh (top-down) ---')
+            self.log('--- [5/6] 3D mesh (priesecniky rovin) ---')
             self.progress_signal.emit(70)
-            verts, faces, plane_areas = topdown_mesh(planes)
-            total = round(sum(p["area_m2"] for p in plane_areas), 1)
-            self.log(f'  Mesh: {len(verts)} v, {len(faces)} f, plášť {total} m²')
+            outline_sjtsk = None
+            for fp in (footprints or []):
+                if fp.get('outline') and len(fp['outline']) >= 4:
+                    outline_sjtsk = fp['outline']
+                    break
+            if outline_sjtsk is not None:
+                try:
+                    import manual_outline as _mo
+                    verts, faces, plane_areas, total = _mo.build_mesh_from_outline(outline_sjtsk, points)
+                    total = round(float(total), 1)
+                    self.log('  Obrys z OSM -> pravidelne roviny')
+                except Exception as _ex:
+                    self.log(f'  build_mesh_from_outline zlyhal ({_ex}), fallback top-down')
+                    verts, faces, plane_areas = topdown_mesh(planes)
+                    total = round(sum(p['area_m2'] for p in plane_areas), 1)
+            else:
+                verts, faces, plane_areas = topdown_mesh(planes)
+                total = round(sum(p['area_m2'] for p in plane_areas), 1)
+            self.log(f'  Mesh: {len(verts)} v, {len(faces)} f, plocha {total} m2')
 
             self.log('\n--- [6/6] Export (PLY / OBJ / viewer) ---')
             self.progress_signal.emit(85)
@@ -373,7 +389,7 @@ class PipelineWorker(QThread):
         """Overpass: budovy s addr:housenumber=number v okolí 1 km."""
         try:
             D = 0.01
-            q = f"""[out:json][timeout:60];(way["building"]["addr:housenumber"="{number}"]({lat-D},{lon-D},{lat+D},{lon+D}););out center tags;"""
+            q = f"""[out:json][timeout:60];(way["building"]["addr:housenumber"="{number}"]({lat-D},{lon-D},{lat+D},{lon+D}););out geom tags;"""
             ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = False
             req = urllib.request.Request('https://overpass-api.de/api/interpreter',
                                          data=q.encode(), headers={'User-Agent': 'RoofAI/2.0'})
@@ -381,9 +397,19 @@ class PipelineWorker(QThread):
                 data = json.loads(r.read())
             out = []
             for e in data.get('elements', []):
-                c = e.get('center')
-                if c:
-                    out.append({'lat': c['lat'], 'lon': c['lon'], 'id': e.get('id')})
+                g = e.get('geometry')
+                if not g or len(g) < 3:
+                    c = e.get('center')
+                    if c:
+                        out.append({'lat': c['lat'], 'lon': c['lon'], 'id': e.get('id')})
+                    continue
+                xs = [p['lon'] for p in g]
+                ys = [p['lat'] for p in g]
+                outline = [T52.transform(x, y) for x, y in zip(xs, ys)]
+                if outline and outline[0] != outline[-1]:
+                    outline = outline + [outline[0]]
+                out.append({'lat': sum(ys)/len(ys), 'lon': sum(xs)/len(xs),
+                            'id': e.get('id'), 'outline': outline})
             return out
         except Exception:
             return []
