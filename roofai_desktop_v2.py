@@ -21,7 +21,7 @@ from shapely import concave_hull
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QTextEdit, QLabel, QProgressBar, QFileDialog,
-    QGroupBox, QCheckBox, QSplitter
+    QGroupBox, QCheckBox, QSplitter, QDialog
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QTextCursor
