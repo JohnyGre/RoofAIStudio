@@ -170,6 +170,10 @@ def build_mesh_from_outline(outline, points, grid=0.35, calibrate=True):
     if points is None or len(points) < 200:
         return None, None, [], 0.0
     ob = ShPolygon(outline)
+    # zjednodušený obrys = priamky (okapy/štíty ako rovné čiary, nie kostrbaté)
+    ob_s = ob.simplify(0.5, preserve_topology=True) if len(outline) > 6 else ob
+    if ob_s.geom_type != 'Polygon' or ob_s.area < 1.0:
+        ob_s = ob
     # auto-kalibrácia: ZBGIS ortofoto má offset ~3-5 m voči LiDAR -> zarovnaj centroidy
     ob_c = np.array([ob.centroid.x, ob.centroid.y])
     if calibrate:
@@ -245,52 +249,82 @@ def build_mesh_from_outline(outline, points, grid=0.35, calibrate=True):
             out = max(geoms, key=lambda g: g.area)
         return out
 
-    # pre každú rovinu: obrys orezaný priesečníkovými priamkami so susedmi
-    results = []
+    # ---- wireframe: najprv HRANY (priamky), potom ROVINY (polygonize) ----
+    from shapely.geometry import LineString
+    from shapely.ops import polygonize, unary_union as _uu2
+
+    lines = [ob_s.boundary]
     for i, pl in enumerate(main):
-        poly = ob
-        for j, pj in enumerate(main):
-            if i == j:
-                continue
-            d2 = cKDTree(pj['pts'][:, :2]).query(pl['pts'][:, :2], k=1)[0].min()
-            if d2 > 2.0:
-                continue
+        for j in range(i + 1, len(main)):
+            pj = main[j]
             c = (np.mean(pl['pts'], axis=0) + np.mean(pj['pts'], axis=0)) / 2
             p0, s = intersect_2planes(pl['n'], pl['d'], pj['n'], pj['d'], c)
             if p0 is None:
                 continue
-            # priesečník musí byť blízko strechy
             if np.hypot(p0[0]-ob_c[0], p0[1]-ob_c[1]) > 30:
                 continue
-            # KĽUČ: priesečníková priamka musí prechádzať blízko bodov OBOCH rovín
-            # (inak ide o „falošného suseda" a orezanie by zdecimovalo roviny)
+            # priesečníková priamka musí byť blízko bodov oboch rovín (reálna hrana)
             di = np.linalg.norm(np.cross(pl['pts'] - p0, s), axis=1)
             dj = np.linalg.norm(np.cross(pj['pts'] - p0, s), axis=1)
-            share_i = float((di < 1.5).mean())
-            share_j = float((dj < 1.5).mean())
-            if share_i < 0.05 or share_j < 0.05:
+            if (di < 1.5).mean() < 0.05 or (dj < 1.5).mean() < 0.05:
                 continue
-            s2 = s[:2]; sl = np.linalg.norm(s2)
+            # úsek priamky: CELÝ priesečník priamky s obrysom (od obrysu po obrys)
+            s2 = s[:2]
+            sl = np.linalg.norm(s2)
             if sl < 1e-9:
                 continue
             s2 /= sl
-            nn = np.array([-s2[1], s2[0]])
-            side_vals = (pl['pts'][:, :2] - p0[:2]) @ nn
-            side = 1 if np.median(side_vals) > 0 else -1
-            poly = clip_halfplane(poly, p0[:2], s2, side)
-            if poly is None:
-                break
-        if poly is None or poly.is_empty or poly.area < 0.5:
+            line_inf = LineString([p0[:2] - 60.0 * s2, p0[:2] + 60.0 * s2])
+            seg = line_inf.intersection(ob_s)
+            if seg.is_empty or seg.length < 1.0:
+                continue
+            lines.append(seg)
+
+    net = _uu2(lines)
+    regions = [g for g in polygonize(net) if g.area > 0.4]
+    results = []
+    for reg in regions:
+        rc = np.array([reg.centroid.x, reg.centroid.y])
+        m = np.array([reg.contains(Point(p)) or reg.boundary.distance(Point(p)) < 0.25
+                      for p in pts[:, :2]])
+        if m.sum() < 10:
             continue
-        results.append((poly, pl))
+        zc = float(np.median(pts[m][:, 2]))
+        best, br = None, 0.6
+        for pl in main:
+            r = abs(float(pl['n'][0]*rc[0] + pl['n'][1]*rc[1] + pl['n'][2]*zc - pl['d']))
+            if r < br:
+                br, best = r, pl
+        if best is None:
+            continue
+        results.append((reg, best))
+
+    # zlúč regióny priradené ROVNAKEJ rovine (1 rovina = 1 polygón)
+    from collections import defaultdict
+    by_plane = defaultdict(list)
+    for reg, pl in results:
+        by_plane[id(pl)].append((reg, pl))
+    merged = []
+    for k, items in by_plane.items():
+        if len(items) == 1:
+            merged.append(items[0])
+            continue
+        regs = [r for r, _ in items]
+        pl = items[0][1]
+        u = _uu2(regs)
+        if u.geom_type == 'Polygon':
+            merged.append((u, pl))
+        else:
+            for g in u.geoms:
+                if g.geom_type == 'Polygon':
+                    merged.append((g, pl))
+    results = merged
 
     verts, faces = [], []
     plane_areas = []
 
-    def emit(xy, pl):
+    def emit(xy, pl, shp_full=None):
         xy = np.asarray(xy, dtype=float)
-        if len(xy) < 3:
-            return
         x2, y2 = xy[:, 0], xy[:, 1]
         a2d = 0.5 * abs(np.dot(x2, np.roll(y2, -1)) - np.dot(y2, np.roll(x2, -1)))
         if a2d < 0.5:
@@ -333,7 +367,7 @@ def build_mesh_from_outline(outline, points, grid=0.35, calibrate=True):
             verts.append((float(p[0]), float(p[1]), float(coef[0]*p[0] + coef[1]*p[1] + coef[2])))
         try:
             tri = Delaunay(xy)
-            shp = ShPolygon(xy)
+            shp = shp_full if shp_full is not None else ShPolygon(xy)
             for t in tri.simplices:
                 c = xy[t].mean(axis=0)
                 if shp.contains(Point(c)) or shp.boundary.distance(Point(c)) < 0.05:
@@ -347,116 +381,15 @@ def build_mesh_from_outline(outline, points, grid=0.35, calibrate=True):
                             'hrany': edges, 'spadnica_m': round(spadnica, 2),
                             'z_min': round(zmin, 2), 'z_max': round(zmax, 2)})
 
-    # ---- vyplnenie dier: bunky diery priradené najbližšej rovine podľa rezídua ----
-    if results and main:
-        from shapely.ops import unary_union
-        unionp = unary_union([p for p, _ in results])
-        gaps = ob.difference(unionp)
-        gap_polys = list(gaps.geoms) if gaps.geom_type != 'Polygon' else [gaps]
-        gap_polys = [g for g in gap_polys if g.area > 0.2]
-        filled_cells = 0
-        if gap_polys:
-            t_all = cKDTree(pts[:, :2])
-            cells_by = {}
-            for g in gap_polys:
-                b = g.bounds
-                xs = np.arange(b[0] - 0.2, b[2] + 0.2, 0.35)
-                ys = np.arange(b[1] - 0.2, b[3] + 0.2, 0.35)
-                for cx in xs:
-                    for cy in ys:
-                        cx, cy = float(cx + 0.175), float(cy + 0.175)
-                        if not g.contains(Point(cx, cy)):
-                            continue
-                        ii = t_all.query_ball_point([cx, cy], 0.45)
-                        if len(ii) < 2:
-                            continue
-                        zc = float(np.median(pts[ii][:, 2]))
-                        best, br = None, 0.35
-                        for pl in main:
-                            r = abs(float(pl['n'][0] * cx + pl['n'][1] * cy + pl['n'][2] * zc - pl['d']))
-                            if r < br:
-                                br, best = r, pl
-                        if best is None and results:
-                            # bunka bez zodpovedajúcej roviny -> najbližší polygón geometricky
-                            cp = Point(cx, cy)
-                            best = min(results, key=lambda rp: rp[0].distance(cp))[1]
-                        if best is not None:
-                            cells_by.setdefault(id(best), []).append((cx, cy))
-                            filled_cells += 1
-        if filled_cells:
-            new_results = []
-            for p, pl in results:
-                cells = cells_by.get(id(pl))
-                if cells:
-                    try:
-                        from shapely.ops import unary_union as _uu
-                        cells_area = _uu([Point(c).buffer(0.22) for c in cells])
-                        joined = p.buffer(0.05).union(cells_area).intersection(ob)
-                        polys = [joined] if joined.geom_type == 'Polygon' else \
-                            [gg for gg in joined.geoms if gg.geom_type == 'Polygon']
-                        added = False
-                        for gg in polys:
-                            gg = gg.simplify(0.2, preserve_topology=True)
-                            if gg.is_valid and gg.area > 0.5:
-                                new_results.append((gg, pl))
-                                added = True
-                        if added:
-                            continue
-                    except Exception:
-                        pass
-                new_results.append((p, pl))
-            results = new_results
-            print(f'[manual] vyplnené diery: {sum(len(v) for v in cells_by.values())} buniek')
+# ---- vyplnenie dier VYPNUTE (hrbole na hranach) ----
 
-    # ---- snapovanie vrcholov (spojiť blízke rohy polygónov do spoločného bodu) ----
-    SNAP = 0.8
-    vtx = []
-    poly_vtx = []
+    # ---- polygóny (regióny) -> triangulácia + klasifikácia ----
+    # (hrany regiónov z polygonize sú už presné priamky - snap netreba)
     for poly, pl in results:
         coords = list(poly.exterior.coords)[:-1]
-        idxs = []
-        for (x, y) in coords:
-            idxs.append(len(vtx))
-            vtx.append([x, y])
-        poly_vtx.append(idxs)
-    vtx = np.array(vtx)
-
-    if len(vtx) > 1:
-        tree = cKDTree(vtx)
-        parent = list(range(len(vtx)))
-
-        def find(a):
-            while parent[a] != a:
-                parent[a] = parent[parent[a]]
-                a = parent[a]
-            return a
-
-        for a, b in tree.query_pairs(SNAP):
-            ra, rb = find(a), find(b)
-            if ra != rb:
-                parent[rb] = ra
-        newpos = {}
-        for r in set(find(i) for i in range(len(vtx))):
-            members = [i for i in range(len(vtx)) if find(i) == r]
-            c = vtx[members].mean(axis=0)
-            for m in members:
-                newpos[m] = c
-        snapped_results = []
-        for (poly, pl), idxs in zip(results, poly_vtx):
-            pts = [tuple(newpos[i]) for i in idxs]
-            clean = []
-            for p in pts:
-                if not clean or np.hypot(clean[-1][0]-p[0], clean[-1][1]-p[1]) > 0.05:
-                    clean.append(p)
-            if len(clean) >= 3:
-                snapped_results.append((clean, pl))
-        results = snapped_results
-
-    # pravidelné polygóny -> triangulácia + klasifikácia
-    for pts, pl in results:
-        if len(pts) < 3:
+        if len(coords) < 3:
             continue
-        emit(np.array(pts), pl)
+        emit(np.array(coords), pl, poly)
 
     total = round(sum(p['area_m2'] for p in plane_areas), 1)
     return verts, faces, plane_areas, total
