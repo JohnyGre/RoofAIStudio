@@ -391,21 +391,24 @@ class PipelineWorker(QThread):
     # ---------- LAZ ----------
     def _ensure_laz(self, lat, lon):
         e, n = T52.transform(lon, lat)
+        import laspy, glob
         existing = []
-        for f in glob.glob(os.path.join(LAZ_DIR, '*.laz')):
+        laz_files = glob.glob(os.path.join(LAZ_DIR, '*.laz'))
+        self.log(f'  Checking {len(laz_files)} local LAZ files for coverage...')
+        for f in laz_files:
             if '.copc.' in f:
                 continue
             try:
-                import laspy; las = laspy.read(f)
-                xs, ys = np.array(las.x), np.array(las.y)
-                if xs.min() <= e <= xs.max() and ys.min() <= n <= ys.max():
-                    existing.append(os.path.basename(f))
-            except Exception:
+                with laspy.open(f) as las:
+                    if las.header.x_min <= e <= las.header.x_max and las.header.y_min <= n <= las.header.y_max:
+                        existing.append(os.path.basename(f))
+            except Exception as ex:
+                self.log(f"  - Warning: Could not read LAZ header for {os.path.basename(f)}: {ex}")
                 pass
         if existing:
-            self.log(f'  Using {len(existing)} existing LAZ file(s)')
+            self.log(f'  Found coverage in {len(existing)} existing LAZ file(s): {", ".join(existing)}')
             return True
-        self.log('  No LAZ coverage. Checking Gmail for MAPKA export...')
+        self.log('  No local LAZ coverage. Checking Gmail for MAPKA export...')
         return self._download_from_gmail(e, n)
 
     def _download_from_gmail(self, e, n):
@@ -618,6 +621,24 @@ class PipelineWorker(QThread):
 # ============================================================
 # GUI
 # ============================================================
+class OutlineWorker(QThread):
+    done_signal = Signal(object)
+    log_signal = Signal(str)
+
+    def __init__(self, lat, lon, parent_widget):
+        super().__init__()
+        self.lat = lat
+        self.lon = lon
+        self.parent_widget = parent_widget
+
+    def run(self):
+        try:
+            result = manual_outline.run_manual_flow(self.lat, self.lon, self.parent_widget)
+            self.done_signal.emit(result)
+        except Exception as ex:
+            self.log_signal.emit(f'Naklikávanie zlyhalo: {ex}')
+            self.done_signal.emit(None)
+
 class RoofAIWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -762,17 +783,18 @@ class RoofAIWindow(QMainWindow):
             return
         lat, lon = gps
         self.status_label.setText('Sťahujem ortofoto (ZBGIS WMS)...')
-        from PySide6.QtWidgets import QApplication
         QApplication.processEvents()
-        try:
-            result = manual_outline.run_manual_flow(lat, lon, self)
-        except Exception as ex:
-            self.log_output.append(f'Naklikávanie zlyhalo: {ex}')
-            self.status_label.setText('Naklikávanie zlyhalo')
-            return
+
+        self.outline_worker = OutlineWorker(lat, lon, self)
+        self.outline_worker.log_signal.connect(self.on_log)
+        self.outline_worker.done_signal.connect(self.on_outline_done)
+        self.outline_worker.start()
+
+    def on_outline_done(self, result):
         if result is None:
-            self.status_label.setText('Naklikávanie zrušené')
+            self.status_label.setText('Naklikávanie zrušené alebo zlyhalo')
             return
+
         verts = result['verts']; faces = result['faces']
         plane_areas = result['plane_areas']; total = result['total']
         outline = result['outline']; meta = result['meta']
@@ -816,6 +838,17 @@ class RoofAIWindow(QMainWindow):
                 for i, p in enumerate(pts):
                     cv2.circle(img, tuple(p), 6, (0, 0, 255), -1)
                     cv2.putText(img, str(i+1), (p[0]+8, p[1]-8), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                # obrysy rovín (okrajové hrany meshu) cez ortofoto
+                from collections import Counter
+                _ec = Counter()
+                for fc in faces:
+                    for _a, _b in [(fc[0], fc[1]), (fc[1], fc[2]), (fc[2], fc[0])]:
+                        _ec[tuple(sorted((_a, _b)))] += 1
+                for (_a, _b), _c in _ec.items():
+                    if _c == 1:
+                        p1 = manual_outline.sjtsk_to_px(verts[_a][0], verts[_a][1], meta)
+                        p2 = manual_outline.sjtsk_to_px(verts[_b][0], verts[_b][1], meta)
+                        cv2.line(img, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), (0, 200, 255), 2)
                 cv2.imwrite(base + '_2d.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 90])
             self.last_result = {'viewer': viewer}
             self.viewer_btn.setEnabled(True)

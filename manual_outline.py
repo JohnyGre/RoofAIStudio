@@ -333,6 +333,67 @@ def build_mesh_from_outline(outline, points, grid=0.35):
                             'hrany': edges, 'spadnica_m': round(spadnica, 2),
                             'z_min': round(zmin, 2), 'z_max': round(zmax, 2)})
 
+    # ---- vyplnenie dier: bunky diery priradené najbližšej rovine podľa rezídua ----
+    if results and main:
+        from shapely.ops import unary_union
+        unionp = unary_union([p for p, _ in results])
+        gaps = ob.difference(unionp)
+        gap_polys = list(gaps.geoms) if gaps.geom_type != 'Polygon' else [gaps]
+        gap_polys = [g for g in gap_polys if g.area > 0.2]
+        filled_cells = 0
+        if gap_polys:
+            t_all = cKDTree(pts[:, :2])
+            cells_by = {}
+            for g in gap_polys:
+                b = g.bounds
+                xs = np.arange(b[0] - 0.2, b[2] + 0.2, 0.35)
+                ys = np.arange(b[1] - 0.2, b[3] + 0.2, 0.35)
+                for cx in xs:
+                    for cy in ys:
+                        cx, cy = float(cx + 0.175), float(cy + 0.175)
+                        if not g.contains(Point(cx, cy)):
+                            continue
+                        ii = t_all.query_ball_point([cx, cy], 0.45)
+                        if len(ii) < 2:
+                            continue
+                        zc = float(np.median(pts[ii][:, 2]))
+                        best, br = None, 0.35
+                        for pl in main:
+                            r = abs(float(pl['n'][0] * cx + pl['n'][1] * cy + pl['n'][2] * zc - pl['d']))
+                            if r < br:
+                                br, best = r, pl
+                        if best is None and results:
+                            # bunka bez zodpovedajúcej roviny -> najbližší polygón geometricky
+                            cp = Point(cx, cy)
+                            best = min(results, key=lambda rp: rp[0].distance(cp))[1]
+                        if best is not None:
+                            cells_by.setdefault(id(best), []).append((cx, cy))
+                            filled_cells += 1
+        if filled_cells:
+            new_results = []
+            for p, pl in results:
+                cells = cells_by.get(id(pl))
+                if cells:
+                    try:
+                        from shapely.ops import unary_union as _uu
+                        cells_area = _uu([Point(c).buffer(0.22) for c in cells])
+                        joined = p.buffer(0.05).union(cells_area).intersection(ob)
+                        polys = [joined] if joined.geom_type == 'Polygon' else \
+                            [gg for gg in joined.geoms if gg.geom_type == 'Polygon']
+                        added = False
+                        for gg in polys:
+                            gg = gg.simplify(0.2, preserve_topology=True)
+                            if gg.is_valid and gg.area > 0.5:
+                                new_results.append((gg, pl))
+                                added = True
+                        if added:
+                            continue
+                    except Exception:
+                        pass
+                new_results.append((p, pl))
+            results = new_results
+            print(f'[manual] vyplnené diery: {sum(len(v) for v in cells_by.values())} buniek')
+
     # ---- snapovanie vrcholov (spojiť blízke rohy polygónov do spoločného bodu) ----
     SNAP = 0.8
     vtx = []
