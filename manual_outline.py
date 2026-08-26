@@ -162,20 +162,32 @@ def load_laz_points(lat, lon, radius=60):
 # ============================================================
 # Mesh z naklikaného obrysu + LiDAR rovín (top-down grid v obryse)
 # ============================================================
-def build_mesh_from_outline(outline, points, grid=0.35):
+def build_mesh_from_outline(outline, points, grid=0.35, calibrate=True):
     """outline: list[(x,y) S-JTSK] obrys strechy. points: LiDAR body (N,3).
+    calibrate: True pre naklikaný obrys z ortofota (ZBGIS offset 3-5 m),
+    False pre presný OSM obrys (žiadny offset).
     Vráti (verts, faces, plane_areas, total)."""
     if points is None or len(points) < 200:
         return None, None, [], 0.0
     ob = ShPolygon(outline)
     # auto-kalibrácia: ZBGIS ortofoto má offset ~3-5 m voči LiDAR -> zarovnaj centroidy
     ob_c = np.array([ob.centroid.x, ob.centroid.y])
-    lidar_c = np.median(points[:, :2], axis=0)
-    shift = ob_c - lidar_c
+    if calibrate:
+        # posun počítaj z bodov BLÍZKO obrysu (nie z mediánu celého okolia!)
+        buf0 = ob.buffer(8.0)
+        m0 = np.array([buf0.contains(Point(p)) for p in points[:, :2]])
+        near = points[m0]
+        if len(near) > 100:
+            lidar_c = np.median(near[:, :2], axis=0)
+        else:
+            lidar_c = np.median(points[:, :2], axis=0)
+        shift = ob_c - lidar_c
+    else:
+        shift = np.array([0.0, 0.0])
     pts = points.copy()
     pts[:, :2] += shift
-    # body len vo vnútri obrysu (+ buffer)
-    buf = ob.buffer(2.0)
+    # body len vo vnútri obrysu (+ malý buffer na okrajové body)
+    buf = ob.buffer(0.8)
     inc = np.array([buf.contains(Point(p)) for p in pts[:, :2]])
     pts = pts[inc]
     if len(pts) < 200:
@@ -252,9 +264,11 @@ def build_mesh_from_outline(outline, points, grid=0.35):
                 continue
             # KĽUČ: priesečníková priamka musí prechádzať blízko bodov OBOCH rovín
             # (inak ide o „falošného suseda" a orezanie by zdecimovalo roviny)
-            d_i = float(np.linalg.norm(np.cross(pl['pts'] - p0, s), axis=1).min())
-            d_j = float(np.linalg.norm(np.cross(pj['pts'] - p0, s), axis=1).min())
-            if min(d_i, d_j) > 1.2:
+            di = np.linalg.norm(np.cross(pl['pts'] - p0, s), axis=1)
+            dj = np.linalg.norm(np.cross(pj['pts'] - p0, s), axis=1)
+            share_i = float((di < 1.5).mean())
+            share_j = float((dj < 1.5).mean())
+            if share_i < 0.05 or share_j < 0.05:
                 continue
             s2 = s[:2]; sl = np.linalg.norm(s2)
             if sl < 1e-9:
