@@ -651,18 +651,36 @@ class OutlineWorker(QThread):
     done_signal = Signal(object)
     log_signal = Signal(str)
 
-    def __init__(self, lat, lon, parent_widget):
+    def __init__(self, lat, lon):
         super().__init__()
         self.lat = lat
         self.lon = lon
-        self.parent_widget = parent_widget
 
     def run(self):
         try:
-            result = manual_outline.run_manual_flow(self.lat, self.lon, self.parent_widget)
+            meta = manual_outline.download_ortho(self.lat, self.lon)
+            self.done_signal.emit(meta)
+        except Exception as ex:
+            self.log_signal.emit(f'Ortofoto zlyhalo: {ex}')
+            self.done_signal.emit(None)
+
+
+class MeshWorker(QThread):
+    done_signal = Signal(object)
+    log_signal = Signal(str)
+
+    def __init__(self, outline, points, meta):
+        super().__init__()
+        self.outline = outline
+        self.points = points
+        self.meta = meta
+
+    def run(self):
+        try:
+            result = manual_outline.build_flow(self.outline, self.points, self.meta)
             self.done_signal.emit(result)
         except Exception as ex:
-            self.log_signal.emit(f'Naklikávanie zlyhalo: {ex}')
+            self.log_signal.emit(f'Mesh zlyhal: {ex}')
             self.done_signal.emit(None)
 
 class RoofAIWindow(QMainWindow):
@@ -810,11 +828,33 @@ class RoofAIWindow(QMainWindow):
         lat, lon = gps
         self.status_label.setText('Sťahujem ortofoto (ZBGIS WMS)...')
         QApplication.processEvents()
-
-        self.outline_worker = OutlineWorker(lat, lon, self)
+        self._outline_latlon = (lat, lon)
+        self.outline_worker = OutlineWorker(lat, lon)
         self.outline_worker.log_signal.connect(self.on_log)
-        self.outline_worker.done_signal.connect(self.on_outline_done)
+        self.outline_worker.done_signal.connect(self._on_ortho_ready)
         self.outline_worker.start()
+
+    def _on_ortho_ready(self, meta):
+        """Ortofoto stiahnute -> dialóg MUSÍ bežať v hlavnom vlákne."""
+        if meta is None:
+            self.status_label.setText('Ortofoto sa nepodarilo stiahnuť')
+            return
+        lat, lon = self._outline_latlon
+        dlg = manual_outline.ManualOutlineDialog(meta, self)
+        if dlg.exec() != QDialog.Accepted or dlg.outline is None:
+            self.status_label.setText('Naklikávanie zrušené')
+            return
+        self.status_label.setText('Počítam mesh (LiDAR + roviny)...')
+        QApplication.processEvents()
+        points = manual_outline.load_laz_points(lat, lon)
+        if points is None:
+            self.log_output.append('Nenašli sa LiDAR body (class 6) pre túto lokalitu.')
+            self.status_label.setText('LiDAR nenájdený')
+            return
+        self.mesh_worker = MeshWorker(dlg.outline, points, meta)
+        self.mesh_worker.log_signal.connect(self.on_log)
+        self.mesh_worker.done_signal.connect(self.on_outline_done)
+        self.mesh_worker.start()
 
     def on_outline_done(self, result):
         if result is None:

@@ -567,12 +567,22 @@ class ManualOutlineDialog(QDialog):
         self.accept()
 
 
+def build_flow(outline, points, meta):
+    """Dopocet meshu z naklikaneho obrysu (bez dialogu - bezi vo workeri).
+    Vrati dict s verts/faces/plane_areas/total/outline/ortho/meta alebo None."""
+    verts, faces, plane_areas, total = build_mesh_from_outline(outline, points)
+    if verts is None or len(verts) < 3:
+        return None
+    return {'verts': verts, 'faces': faces, 'plane_areas': plane_areas, 'total': total,
+            'outline': outline, 'ortho': meta['path'], 'meta': meta}
+
+
 def run_manual_flow(lat, lon, parent=None):
-    """Kompletný flow: stiahni ortofoto -> naklikaj obrys -> dopočítaj mesh.
-    Vráti dict s verts/faces/plane_areas/total/outline alebo None."""
+    """Kompletny flow: stiahni ortofoto -> naklikaj obrys -> dopocitaj mesh.
+    POZOR: dialog MUSI bezat v hlavnom vlakne, nie v QThread!"""
     meta = download_ortho(lat, lon)
     if meta is None:
-        QMessageBox.warning(parent, 'Ortofoto', 'Nepodarilo sa stiahnuť ortofoto (ZBGIS WMS).')
+        QMessageBox.warning(parent, 'Ortofoto', 'Nepodarilo sa stiahnut ortofoto (ZBGIS WMS).')
         return None
     dlg = ManualOutlineDialog(meta, parent)
     if dlg.exec() != QDialog.Accepted or dlg.outline is None:
@@ -580,11 +590,6 @@ def run_manual_flow(lat, lon, parent=None):
     outline = dlg.outline
     points = load_laz_points(lat, lon)
     if points is None:
-        QMessageBox.warning(parent, 'LiDAR', 'Nenašli sa LiDAR body (class 6) pre túto lokalitu.')
+        QMessageBox.warning(parent, 'LiDAR', 'Nenasli sa LiDAR body (class 6) pre tuto lokalitu.')
         return None
-    verts, faces, plane_areas, total = build_mesh_from_outline(outline, points)
-    if verts is None or len(verts) < 3:
-        QMessageBox.warning(parent, 'Mesh', 'Z naklikaného obrysu sa nepodarilo postaviť mesh.')
-        return None
-    return {'verts': verts, 'faces': faces, 'plane_areas': plane_areas, 'total': total,
-            'outline': outline, 'ortho': meta['path'], 'meta': meta}
+    return build_flow(outline, points, meta)
