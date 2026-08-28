@@ -162,36 +162,20 @@ def load_laz_points(lat, lon, radius=60):
 # ============================================================
 # Mesh z naklikaného obrysu + LiDAR rovín (top-down grid v obryse)
 # ============================================================
-def build_mesh_from_outline(outline, points, grid=0.35, calibrate=True):
+def build_mesh_from_outline(outline, points, grid=0.35):
     """outline: list[(x,y) S-JTSK] obrys strechy. points: LiDAR body (N,3).
-    calibrate: True pre naklikaný obrys z ortofota (ZBGIS offset 3-5 m),
-    False pre presný OSM obrys (žiadny offset).
     Vráti (verts, faces, plane_areas, total)."""
     if points is None or len(points) < 200:
         return None, None, [], 0.0
     ob = ShPolygon(outline)
-    # zjednodušený obrys = priamky (okapy/štíty ako rovné čiary, nie kostrbaté)
-    ob_s = ob.simplify(0.5, preserve_topology=True) if len(outline) > 6 else ob
-    if ob_s.geom_type != 'Polygon' or ob_s.area < 1.0:
-        ob_s = ob
     # auto-kalibrácia: ZBGIS ortofoto má offset ~3-5 m voči LiDAR -> zarovnaj centroidy
     ob_c = np.array([ob.centroid.x, ob.centroid.y])
-    if calibrate:
-        # posun počítaj z bodov BLÍZKO obrysu (nie z mediánu celého okolia!)
-        buf0 = ob.buffer(8.0)
-        m0 = np.array([buf0.contains(Point(p)) for p in points[:, :2]])
-        near = points[m0]
-        if len(near) > 100:
-            lidar_c = np.median(near[:, :2], axis=0)
-        else:
-            lidar_c = np.median(points[:, :2], axis=0)
-        shift = ob_c - lidar_c
-    else:
-        shift = np.array([0.0, 0.0])
+    lidar_c = np.median(points[:, :2], axis=0)
+    shift = ob_c - lidar_c
     pts = points.copy()
     pts[:, :2] += shift
-    # body len vo vnútri obrysu (+ malý buffer na okrajové body)
-    buf = ob.buffer(0.8)
+    # body len vo vnútri obrysu (+ buffer)
+    buf = ob.buffer(2.0)
     inc = np.array([buf.contains(Point(p)) for p in pts[:, :2]])
     pts = pts[inc]
     if len(pts) < 200:
@@ -207,124 +191,66 @@ def build_mesh_from_outline(outline, points, grid=0.35, calibrate=True):
         main = planes[:6]
     print(f'[manual] RANSAC {len(planes)} rovín -> {len(main)} hlavných')
 
-    # ---- pravidelné polygóny: priesečníky rovín (zdieľané presné hrany) ----
+        # ---- roviny cez hull buniek + grid ("vyššie Z vyhráva") + approxPolyDP ----
+    h2d = []
     for pl in main:
-        pl['d'] = float(np.mean(pl['pts'] @ pl['n']))
-
-    def intersect_2planes(n1, d1, n2, d2, c):
-        s = np.cross(n1, n2)
-        sl = np.linalg.norm(s)
-        if sl < 1e-9:
-            return None, None
-        s /= sl
-        A = np.vstack([n1, n2, s])
-        b = np.array([d1, d2, np.dot(s, c)])
         try:
-            p = np.linalg.solve(A, b)
-        except np.linalg.LinAlgError:
-            return None, None
-        return p, s
+            h = concave_hull(MultiPoint(pl["pts"][:, :2]), ratio=0.05).simplify(0.35, preserve_topology=True)
+        except Exception:
+            h = ShPolygon(pl["pts"][:, :2]).convex_hull
+        if h.geom_type == "MultiPolygon":
+            h = max(h.geoms, key=lambda g: g.area)
+        pl["hull2d"] = h
+        if h.geom_type == "Polygon" and h.area > 3:
+            h2d.append((h, pl))
 
-    def clip_halfplane(poly, p0, s2, side):
-        px0, py0 = float(p0[0]), float(p0[1])
-        sx, sy = float(s2[0]), float(s2[1])
-        nx, ny = -sy, sx
-        x0, y0, x1, y1 = poly.bounds
-        dd = max(x1-x0, y1-y0) * 40
-        off = 0.02 if side > 0 else -0.02
-        corners = [
-            (px0 - dd*sx + off*nx, py0 - dd*sy + off*ny),
-            (px0 + dd*sx + off*nx, py0 + dd*sy + off*ny),
-            (px0 + dd*sx + side*dd*nx, py0 + dd*sy + side*dd*ny),
-            (px0 - dd*sx + side*dd*nx, py0 - dd*sy + side*dd*ny),
-        ]
-        hp = ShPolygon(corners)
-        out = poly.intersection(hp)
-        if out.is_empty:
-            return None
-        if out.geom_type != 'Polygon':
-            geoms = [g for g in out.geoms if g.geom_type == 'Polygon']
-            if not geoms:
-                return None
-            out = max(geoms, key=lambda g: g.area)
-        return out
+    xs, ys = pts[:, 0], pts[:, 1]
+    gx0, gy0 = xs.min() - 1, ys.min() - 1
+    gx1, gy1 = xs.max() + 1, ys.max() + 1
+    grid = 0.5
+    nx = int(math.ceil((gx1 - gx0) / grid))
+    ny = int(math.ceil((gy1 - gy0) / grid))
+    cx_g = gx0 + (np.arange(nx) + 0.5) * grid
+    cy_g = gy0 + (np.arange(ny) + 0.5) * grid
+    labels = np.full((ny, nx), -1, dtype=np.int16)
+    z_top = np.full((ny, nx), -np.inf)
+    for k, (h, pl) in enumerate(h2d):
+        bx0, by0, bx1, by1 = h.bounds
+        i0 = max(0, int((bx0-gx0)/grid)); i1 = min(nx, int((bx1-gx0)/grid)+1)
+        j0 = max(0, int((by0-gy0)/grid)); j1 = min(ny, int((by1-gy0)/grid)+1)
+        coef = pl["coef"]
+        for j in range(j0, j1):
+            yy = cy_g[j]
+            for i in range(i0, i1):
+                xx = cx_g[i]
+                if h.contains(Point(xx, yy)):
+                    zz = coef[0]*xx + coef[1]*yy + coef[2]
+                    if zz > z_top[j, i]:
+                        z_top[j, i] = zz
+                        labels[j, i] = k
 
-    # ---- wireframe: najprv HRANY (priamky), potom ROVINY (polygonize) ----
-    from shapely.geometry import LineString
-    from shapely.ops import polygonize, unary_union as _uu2
-
-    lines = [ob_s.boundary]
-    for i, pl in enumerate(main):
-        for j in range(i + 1, len(main)):
-            pj = main[j]
-            c = (np.mean(pl['pts'], axis=0) + np.mean(pj['pts'], axis=0)) / 2
-            p0, s = intersect_2planes(pl['n'], pl['d'], pj['n'], pj['d'], c)
-            if p0 is None:
-                continue
-            if np.hypot(p0[0]-ob_c[0], p0[1]-ob_c[1]) > 30:
-                continue
-            # priesečníková priamka musí byť blízko bodov oboch rovín (reálna hrana)
-            di = np.linalg.norm(np.cross(pl['pts'] - p0, s), axis=1)
-            dj = np.linalg.norm(np.cross(pj['pts'] - p0, s), axis=1)
-            if (di < 1.5).mean() < 0.05 or (dj < 1.5).mean() < 0.05:
-                continue
-            # úsek priamky: CELÝ priesečník priamky s obrysom (od obrysu po obrys)
-            s2 = s[:2]
-            sl = np.linalg.norm(s2)
-            if sl < 1e-9:
-                continue
-            s2 /= sl
-            line_inf = LineString([p0[:2] - 60.0 * s2, p0[:2] + 60.0 * s2])
-            seg = line_inf.intersection(ob_s)
-            if seg.is_empty or seg.length < 1.0:
-                continue
-            lines.append(seg)
-
-    net = _uu2(lines)
-    regions = [g for g in polygonize(net) if g.area > 0.4]
     results = []
-    for reg in regions:
-        rc = np.array([reg.centroid.x, reg.centroid.y])
-        m = np.array([reg.contains(Point(p)) or reg.boundary.distance(Point(p)) < 0.25
-                      for p in pts[:, :2]])
-        if m.sum() < 10:
-            continue
-        zc = float(np.median(pts[m][:, 2]))
-        best, br = None, 0.6
-        for pl in main:
-            r = abs(float(pl['n'][0]*rc[0] + pl['n'][1]*rc[1] + pl['n'][2]*zc - pl['d']))
-            if r < br:
-                br, best = r, pl
-        if best is None:
-            continue
-        results.append((reg, best))
-
-    # zlúč regióny priradené ROVNAKEJ rovine (1 rovina = 1 polygón)
-    from collections import defaultdict
-    by_plane = defaultdict(list)
-    for reg, pl in results:
-        by_plane[id(pl)].append((reg, pl))
-    merged = []
-    for k, items in by_plane.items():
-        if len(items) == 1:
-            merged.append(items[0])
-            continue
-        regs = [r for r, _ in items]
-        pl = items[0][1]
-        u = _uu2(regs)
-        if u.geom_type == 'Polygon':
-            merged.append((u, pl))
-        else:
-            for g in u.geoms:
-                if g.geom_type == 'Polygon':
-                    merged.append((g, pl))
-    results = merged
+    for k, (h, pl) in enumerate(h2d):
+        mask = (labels == k).astype(np.uint8)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            if cv2.contourArea(cnt) < 3:
+                continue
+            poly_pts = np.array([cnt[i][0] for i in range(len(cnt))], dtype=float)
+            xy = [(gx0 + (x + 0.5) * grid, gy0 + (y + 0.5) * grid) for x, y in poly_pts]
+            ap = cv2.approxPolyDP(poly_pts.astype(np.float32).reshape(-1, 1, 2), 0.4, True)
+            xy_s = [(gx0 + (p[0][0] + 0.5) * grid, gy0 + (p[0][1] + 0.5) * grid) for p in ap]
+            if len(xy_s) < 3:
+                continue
+            results.append((xy_s, pl))
 
     verts, faces = [], []
     plane_areas = []
 
-    def emit(xy, pl, shp_full=None):
+    def emit(xy, pl):
         xy = np.asarray(xy, dtype=float)
+        if len(xy) < 3:
+            return
         x2, y2 = xy[:, 0], xy[:, 1]
         a2d = 0.5 * abs(np.dot(x2, np.roll(y2, -1)) - np.dot(y2, np.roll(x2, -1)))
         if a2d < 0.5:
@@ -334,7 +260,6 @@ def build_mesh_from_outline(outline, points, grid=0.35, calibrate=True):
         pts3d = np.column_stack([xy[:, 0], xy[:, 1], coef[0]*xy[:, 0] + coef[1]*xy[:, 1] + coef[2]])
         z_pts = pl['pts'][:, 2]
         zmin, zmax = float(z_pts.min()), float(z_pts.max())
-        # klasifikácia hrán + dĺžky
         edges = []
         kk = len(xy)
         for t in range(kk):
@@ -350,13 +275,12 @@ def build_mesh_from_outline(outline, points, grid=0.35, calibrate=True):
                         continue
                     d2 = np.min(np.hypot(o['pts'][:, 0]-M[0], o['pts'][:, 1]-M[1]))
                     if d2 < 1.0:
-                        # len vodorovné zložky normál (zvislá ~0.7 by vždy dala kladný dot)
                         dot_h = float(pl['n'][0]*o['n'][0] + pl['n'][1]*o['n'][1])
                         typ = 'u' if dot_h > 0 else 'h'
                         break
             else:
                 if dz_edge > 0.3:
-                    typ = 'n'  # nárožie (šikmá obrysová hrana = valba)
+                    typ = 'n'
                 else:
                     zrel = (M[2] - zmin) / (zmax - zmin + 1e-9)
                     typ = 'o' if zrel < 0.35 else 'f'
@@ -367,7 +291,7 @@ def build_mesh_from_outline(outline, points, grid=0.35, calibrate=True):
             verts.append((float(p[0]), float(p[1]), float(coef[0]*p[0] + coef[1]*p[1] + coef[2])))
         try:
             tri = Delaunay(xy)
-            shp = shp_full if shp_full is not None else ShPolygon(xy)
+            shp = ShPolygon(xy)
             for t in tri.simplices:
                 c = xy[t].mean(axis=0)
                 if shp.contains(Point(c)) or shp.boundary.distance(Point(c)) < 0.05:
@@ -381,15 +305,8 @@ def build_mesh_from_outline(outline, points, grid=0.35, calibrate=True):
                             'hrany': edges, 'spadnica_m': round(spadnica, 2),
                             'z_min': round(zmin, 2), 'z_max': round(zmax, 2)})
 
-# ---- vyplnenie dier VYPNUTE (hrbole na hranach) ----
-
-    # ---- polygóny (regióny) -> triangulácia + klasifikácia ----
-    # (hrany regiónov z polygonize sú už presné priamky - snap netreba)
-    for poly, pl in results:
-        coords = list(poly.exterior.coords)[:-1]
-        if len(coords) < 3:
-            continue
-        emit(np.array(coords), pl, poly)
+    for xy_s, pl in results:
+        emit(np.array(xy_s), pl)
 
     total = round(sum(p['area_m2'] for p in plane_areas), 1)
     return verts, faces, plane_areas, total
