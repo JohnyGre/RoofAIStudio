@@ -221,6 +221,19 @@ def make_viewer_html(verts, faces, title, area_m2, plane_areas):
     else:
         three_js = ''  # bez three.js -> viewer nebude fungovať, ale súbor vznikne
 
+    # farebné hrany + kóty (per rovina, z metadát)
+    edge_list = []
+    for pa in plane_areas:
+        for e in pa.get('hrany', []):
+            if 'p1' not in e or 'p2' not in e:
+                continue
+            t = e.get('type') or e.get('typ', '')
+            m = {'h': 'hrebeň', 'o': 'odkvap', 'n': 'nárožie', 'u': 'úžľabie', 'f': 'štít'}
+            t = m.get(t, t)
+            edge_list.append([e['p1'][0], e['p1'][1], e['p1'][2],
+                              e['p2'][0], e['p2'][1], e['p2'][2],
+                              t, e['dlzka_m']])
+
     if len(verts) < 3:
         return None
     cx = sum(v[0] for v in verts) / len(verts)
@@ -263,6 +276,33 @@ def make_viewer_html(verts, faces, title, area_m2, plane_areas):
   var mat=new THREE.MeshPhongMaterial({vertexColors:true,side:THREE.DoubleSide,flatShading:true});
   var mesh=new THREE.Mesh(geo,mat); scene.add(mesh);
   scene.add(new THREE.GridHelper(%MAXDIM%*2.5,30,0x666666,0x333333));
+  // ---- hrany rovín: farebné + kóty ----
+  var EDGES=%EDGES%;
+  var ECOL={'odkvap':0x3498db,'o':0x3498db,'hrebeň':0xe74c3c,'h':0xe74c3c,
+            'nárožie':0x2ecc71,'n':0x2ecc71,'úžľabie':0x9b59b6,'u':0x9b59b6,'štít':0xf39c12,'f':0xf39c12};
+  function edgeLabel(text, col){
+    var cv=document.createElement('canvas'); cv.width=160; cv.height=72;
+    var c2=cv.getContext('2d');
+    c2.fillStyle='rgba(15,15,20,0.72)'; c2.fillRect(0,0,160,72);
+    c2.strokeStyle=col; c2.lineWidth=4; c2.strokeRect(2,2,156,68);
+    c2.fillStyle=col; c2.font='bold 40px Arial'; c2.textAlign='center'; c2.textBaseline='middle';
+    c2.fillText(text, 80, 38);
+    var tex=new THREE.CanvasTexture(cv);
+    var mat=new THREE.SpriteMaterial({map:tex, depthTest:false, transparent:true});
+    var sp=new THREE.Sprite(mat); sp.scale.set(2.2, 1.0, 1); return sp;
+  }
+  EDGES.forEach(function(e){
+    var col = ECOL[e[6]] !== undefined ? ECOL[e[6]] : 0x999999;
+    var g = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(e[0]-(%CX%), e[1]-(%CY%), e[2]-(%CZ%)),
+        new THREE.Vector3(e[3]-(%CX%), e[4]-(%CY%), e[5]-(%CZ%))]);
+    scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({color: col})));
+    if (e[7] > 1.2) {
+      var sp = edgeLabel(e[7].toFixed(1) + ' m', '#'+col.toString(16).padStart(6,'0'));
+      sp.position.set((e[0]+e[3])/2-(%CX%), (e[1]+e[4])/2-(%CY%), (e[2]+e[5])/2-(%CZ%) + 0.6);
+      scene.add(sp);
+    }
+  });
   scene.add(new THREE.AmbientLight(0xffffff,0.55));
   var dl=new THREE.DirectionalLight(0xffffff,0.9); dl.position.set(1,2,1); scene.add(dl);
   var theta=Math.PI/4, phi=Math.PI/5, dist=%MAXDIM%*2.0, panX=0, panY=0;
@@ -282,7 +322,7 @@ def make_viewer_html(verts, faces, title, area_m2, plane_areas):
     return (html.replace('%TITLE%', title).replace('%AREA%', str(area_m2)).replace('%NPL%', str(len(plane_areas)))
             .replace('%PLANES%', planes_txt).replace('%THREEJS%', three_js)
             .replace('%VERTS%', json.dumps([[round(v[0],2), round(v[1],2), round(v[2],2)] for v in verts]))
-            .replace('%FACES%', json.dumps(faces))
+            .replace('%EDGES%', json.dumps(edge_list)).replace('%FACES%', json.dumps(faces))
             .replace('%CX%', str(round(cx,2))).replace('%CY%', str(round(cy,2))).replace('%CZ%', str(round(cz,2)))
             .replace('%MAXDIM%', str(round(maxdim,2))))
 

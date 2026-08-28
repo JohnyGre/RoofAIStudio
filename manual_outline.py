@@ -348,7 +348,9 @@ def build_mesh_from_outline(outline, points, grid=0.35):
                 else:
                     zrel = (M[2] - zmin) / (zmax - zmin + 1e-9)
                     typ = 'o' if zrel < 0.35 else 'f'
-            edges.append({'typ': typ, 'dlzka_m': round(length, 2)})
+            edges.append({'typ': typ, 'dlzka_m': round(length, 2),
+                        'p1': [round(float(A[0]), 2), round(float(A[1]), 2), round(float(A[2]), 2)],
+                        'p2': [round(float(B[0]), 2), round(float(B[1]), 2), round(float(B[2]), 2)]})
         spadnica = (zmax - zmin) / math.sin(math.radians(pl['slope']))
         base = len(verts)
         for p in xy:
