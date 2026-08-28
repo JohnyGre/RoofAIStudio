@@ -191,18 +191,43 @@ def build_mesh_from_outline(outline, points, grid=0.35):
         main = planes[:6]
     print(f'[manual] RANSAC {len(planes)} rovín -> {len(main)} hlavných')
 
-        # ---- roviny cez hull buniek + grid ("vyššie Z vyhráva") + approxPolyDP ----
-    h2d = []
-    for pl in main:
-        try:
-            h = concave_hull(MultiPoint(pl["pts"][:, :2]), ratio=0.05).simplify(0.35, preserve_topology=True)
-        except Exception:
-            h = ShPolygon(pl["pts"][:, :2]).convex_hull
-        if h.geom_type == "MultiPolygon":
-            h = max(h.geoms, key=lambda g: g.area)
-        pl["hull2d"] = h
-        if h.geom_type == "Polygon" and h.area > 3:
-            h2d.append((h, pl))
+        # ---- merge koplanárnych susedných zhlukov (jedna fyzická rovina = jeden zhluk) ----
+    def merge_coplanar_clusters(pls):
+        import roof_geometry_reconstruction as _rg
+        planes_r = [_rg.fit_plane(pl["pts"]) for pl in pls]
+        adj = _rg.detect_adjacency(planes_r)
+        parent = list(range(len(pls)))
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+        for (i, j) in adj:
+            ni = planes_r[i]["normal"] / np.linalg.norm(planes_r[i]["normal"])
+            nj = planes_r[j]["normal"] / np.linalg.norm(planes_r[j]["normal"])
+            angle = float(np.degrees(np.arccos(np.clip(float(np.dot(ni, nj)), -1.0, 1.0))))
+            if angle < 4.0:
+                parent[find(j)] = find(i)
+        groups = {}
+        for k, pl in enumerate(pls):
+            groups.setdefault(find(k), []).append(pl)
+        out = []
+        for root, pls_g in groups.items():
+            if len(pls_g) == 1:
+                out.append(pls_g[0])
+                continue
+            pts_all = np.vstack([pl["pts"] for pl in pls_g])
+            pr = _rg.fit_plane(pts_all)
+            slope = float(np.degrees(np.arccos(abs(pr["normal"][2]))))
+            az = (float(np.degrees(np.arctan2(-pr["normal"][0], -pr["normal"][1]))) + 360) % 360
+            rmse = float(np.sqrt(np.mean((pts_all @ pr["normal"] - pr["d"]) ** 2)))
+            out.append({"normal": pr["normal"], "coef": pr["coef"], "pts": pts_all,
+                        "slope": slope, "az": az, "rmse": rmse, "cnt": len(pts_all),
+                        "d": float(pr["normal"] @ pr["centroid"])})
+        return out
+
+    main = merge_coplanar_clusters(main)
+    print(f"[manual] po merge koplanárnych: {len(main)} rovín")
 
     # priesečníkové hrany rovín (hrebeň/nárožie/úžľabie) cez rgr modul
     import roof_geometry_reconstruction as _rgr
@@ -215,45 +240,66 @@ def build_mesh_from_outline(outline, points, grid=0.35):
     _adj = _rgr.detect_adjacency(_planes_rgr)
     _edges_rgr = _rgr.plane_edges(_planes_rgr, _adj, ob)
 
+    # ---- grid: majoritné hlasovanie LiDAR bodov per bunka (partition bez prekryvov) ----
     xs, ys = pts[:, 0], pts[:, 1]
     gx0, gy0 = xs.min() - 1, ys.min() - 1
     gx1, gy1 = xs.max() + 1, ys.max() + 1
     grid = 0.5
     nx = int(math.ceil((gx1 - gx0) / grid))
     ny = int(math.ceil((gy1 - gy0) / grid))
-    cx_g = gx0 + (np.arange(nx) + 0.5) * grid
-    cy_g = gy0 + (np.arange(ny) + 0.5) * grid
-    labels = np.full((ny, nx), -1, dtype=np.int16)
-    z_top = np.full((ny, nx), -np.inf)
-    for k, (h, pl) in enumerate(h2d):
-        bx0, by0, bx1, by1 = h.bounds
-        i0 = max(0, int((bx0-gx0)/grid)); i1 = min(nx, int((bx1-gx0)/grid)+1)
-        j0 = max(0, int((by0-gy0)/grid)); j1 = min(ny, int((by1-gy0)/grid)+1)
-        coef = pl["coef"]
-        for j in range(j0, j1):
-            yy = cy_g[j]
-            for i in range(i0, i1):
-                xx = cx_g[i]
-                if h.contains(Point(xx, yy)):
-                    zz = coef[0]*xx + coef[1]*yy + coef[2]
-                    if zz > z_top[j, i]:
-                        z_top[j, i] = zz
-                        labels[j, i] = k
+    counts = np.zeros((len(main), ny, nx), dtype=np.int32)
+    for k, pl in enumerate(main):
+        b = pl["pts"]
+        ix = np.clip(((b[:, 0] - gx0) / grid).astype(np.int64), 0, nx - 1)
+        iy = np.clip(((b[:, 1] - gy0) / grid).astype(np.int64), 0, ny - 1)
+        np.add.at(counts, (k, iy, ix), 1)
+    labels = counts.argmax(axis=0).astype(np.int16)
+    labels[np.max(counts, axis=0) == 0] = -1
+    # vyplniť prázdne bunky najbližšou hodnotou (partition bez dier)
+    from scipy import ndimage as _ndi
+    if (labels < 0).any():
+        ind = _ndi.distance_transform_edt(labels < 0, return_distances=False, return_indices=True)
+        labels = labels[tuple(ind)]
 
+    # regióny per rovina -> kontúry -> approxPolyDP (rovné hrany)
     results = []
-    for k, (h, pl) in enumerate(h2d):
+    for k, pl in enumerate(main):
         mask = (labels == k).astype(np.uint8)
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for cnt in contours:
             if cv2.contourArea(cnt) < 3:
                 continue
             poly_pts = np.array([cnt[i][0] for i in range(len(cnt))], dtype=float)
-            xy = [(gx0 + (x + 0.5) * grid, gy0 + (y + 0.5) * grid) for x, y in poly_pts]
-            ap = cv2.approxPolyDP(poly_pts.astype(np.float32).reshape(-1, 1, 2), 0.4, True)
+            ap = cv2.approxPolyDP(poly_pts.astype(np.float32).reshape(-1, 1, 2), 0.5, True)
             xy_s = [(gx0 + (p[0][0] + 0.5) * grid, gy0 + (p[0][1] + 0.5) * grid) for p in ap]
             if len(xy_s) < 3:
                 continue
             results.append((xy_s, pl))
+
+    # zlúčenie regiónov rovnakej roviny (1 rovina = 1 polygón)
+    from shapely.ops import unary_union as _uuo
+    from collections import defaultdict as _dd
+    by_plane = _dd()
+    for xy_s, pl in results:
+        by_plane.setdefault(id(pl), []).append((xy_s, pl))
+    results2 = []
+    for k2, items in by_plane.items():
+        pl = items[0][1]
+        if len(items) == 1:
+            results2.append(items[0])
+            continue
+        gs = [ShPolygon(it[0]) for it in items if len(it[0]) >= 3]
+        if not gs:
+            results2.append(items[0])
+            continue
+        u = _uuo(gs)
+        if u.geom_type == "Polygon":
+            results2.append((list(u.exterior.coords)[:-1], pl))
+        else:
+            for g in u.geoms:
+                if g.geom_type == "Polygon" and g.area > 1.0:
+                    results2.append((list(g.exterior.coords)[:-1], pl))
+    results = results2
 
     verts, faces = [], []
     plane_areas = []
