@@ -204,6 +204,17 @@ def build_mesh_from_outline(outline, points, grid=0.35):
         if h.geom_type == "Polygon" and h.area > 3:
             h2d.append((h, pl))
 
+    # priesečníkové hrany rovín (hrebeň/nárožie/úžľabie) cez rgr modul
+    import roof_geometry_reconstruction as _rgr
+    _planes_rgr = []
+    for _pl in main:
+        _pr = _rgr.fit_plane(_pl['pts'])
+        _pr['coef'] = _pl['coef']
+        _pr['d'] = float(_pr['normal'] @ _pr['centroid'])
+        _planes_rgr.append(_pr)
+    _adj = _rgr.detect_adjacency(_planes_rgr)
+    _edges_rgr = _rgr.plane_edges(_planes_rgr, _adj, ob)
+
     xs, ys = pts[:, 0], pts[:, 1]
     gx0, gy0 = xs.min() - 1, ys.min() - 1
     gx1, gy1 = xs.max() + 1, ys.max() + 1
@@ -269,15 +280,22 @@ def build_mesh_from_outline(outline, points, grid=0.35):
             dz_edge = abs(float(B[2] - A[2]))
             on_outline = ob.boundary.distance(Point(M[0], M[1])) < 1.0
             if not on_outline:
-                typ = 'h'
-                for o in main:
-                    if o is pl:
-                        continue
-                    d2 = np.min(np.hypot(o['pts'][:, 0]-M[0], o['pts'][:, 1]-M[1]))
-                    if d2 < 1.0:
-                        dot_h = float(pl['n'][0]*o['n'][0] + pl['n'][1]*o['n'][1])
-                        typ = 'u' if dot_h > 0 else 'h'
-                        break
+                # priesečníková priamka susednej roviny blízko? -> hrebeň/nárožie/úžľabie
+                typ2 = None
+                try:
+                    _ki = main.index(pl)
+                except ValueError:
+                    _ki = -1
+                for (ka, kb), e2 in _edges_rgr.items():
+                    if _ki in (ka, kb):
+                        if _rgr._dist_point_line_2d(M[:2], e2['p'][:2], e2['s'][:2]) < 2.0:
+                            typ2 = e2['type']
+                            break
+                if typ2 is not None:
+                    typ = typ2
+                else:
+                    zrel = (M[2] - zmin) / (zmax - zmin + 1e-9)
+                    typ = 'o' if zrel < 0.35 else 'f'
             else:
                 if dz_edge > 0.3:
                     typ = 'n'
