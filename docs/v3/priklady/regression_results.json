@@ -2,7 +2,7 @@
   {
     "name": "Triova_7751_16A_Trnava",
     "run_ok": true,
-    "seconds": 27.1,
+    "seconds": 32.9,
     "roof_area_m2": 287.03,
     "footprint_m2": 343.69,
     "edges": {
@@ -14,7 +14,7 @@
     },
     "contract_errors": 0,
     "qa_errors": 0,
-    "qa_warnings": 4,
+    "qa_warnings": 7,
     "planes": 11,
     "classified": 37,
     "area_ratio": 0.84,
@@ -23,7 +23,7 @@
   {
     "name": "Atriova_9309_16_Trnava",
     "run_ok": true,
-    "seconds": 72.7,
+    "seconds": 77.2,
     "roof_area_m2": 131.06,
     "footprint_m2": null,
     "edges": {
@@ -35,7 +35,7 @@
     },
     "contract_errors": 0,
     "qa_errors": 0,
-    "qa_warnings": 1,
+    "qa_warnings": 0,
     "planes": 4,
     "classified": 11,
     "area_ratio": null,
@@ -44,7 +44,7 @@
   {
     "name": "Beluj_50",
     "run_ok": true,
-    "seconds": 76.9,
+    "seconds": 76.6,
     "roof_area_m2": 186.05,
     "footprint_m2": null,
     "edges": {
@@ -56,7 +56,7 @@
     },
     "contract_errors": 0,
     "qa_errors": 0,
-    "qa_warnings": 6,
+    "qa_warnings": 7,
     "planes": 9,
     "classified": 25,
     "area_ratio": null,

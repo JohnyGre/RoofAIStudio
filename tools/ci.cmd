@@ -12,6 +12,8 @@ echo === 1/5 testy jadra ===
 "%PY%" tests\test_core_contract.py || exit /b 1
 echo   (test mosta hran desktop-^>kontrakt)
 "%PY%" tests\test_edges_bridge.py || exit /b 1
+echo   (test QA kontrol hrán)
+"%PY%" tests\test_edge_qa.py || exit /b 1
 
 echo === 2/5 selfcheck (kontrakt/fuzia/registracia/QA) ===
 "%PY%" tools\core_selfcheck.py || exit /b 1

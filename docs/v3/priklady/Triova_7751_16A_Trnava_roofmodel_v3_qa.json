@@ -5,32 +5,59 @@
     "errors": [],
     "warnings": [
       {
+        "check": "gable_shared",
+        "plane": "R9",
+        "edge": "s1",
+        "severity": "warning",
+        "detail": "štít R9.s1 leží na hrane R3.Xn4 (typ n) — spoločná hrana nie je štít"
+      },
+      {
+        "check": "duplicate_edges",
+        "plane": "R9",
+        "severity": "warning",
+        "detail": "R9: hrany s1 (s) a Xn2 (n) ležia na tej istej čiare"
+      },
+      {
+        "check": "duplicate_edges",
+        "plane": "R9",
+        "severity": "warning",
+        "detail": "R9: hrany o3 (o) a Xu1 (u) ležia na tej istej čiare"
+      },
+      {
+        "check": "edge_type_consistency",
+        "severity": "warning",
+        "detail": "R1.Xu3='u' vs R9.o3='o' — tá istá hrana, rôzny typ"
+      },
+      {
         "check": "plane_has_eave",
         "plane": "R4",
         "severity": "warning",
-        "detail": "šikmá rovina (30.7°) nemá odkvapovú hranu"
+        "detail": "R4 (sklon 30.7°) nemá vodorovný odkvap"
       },
       {
         "check": "plane_has_eave",
         "plane": "R5",
         "severity": "warning",
-        "detail": "šikmá rovina (30.6°) nemá odkvapovú hranu"
+        "detail": "R5 (sklon 30.62°) nemá vodorovný odkvap"
       },
       {
         "check": "plane_has_eave",
         "plane": "R8",
         "severity": "warning",
-        "detail": "šikmá rovina (30.7°) nemá odkvapovú hranu"
-      },
+        "detail": "R8 (sklon 30.71°) nemá vodorovný odkvap"
+      }
+    ],
+    "info": [
       {
         "check": "areas_true",
-        "severity": "warning",
-        "detail": "skutočná plocha strechy (šikmá) je 332.3 m², pôdorysný súčet 287.0 m² (+16 %) — použiť pre kalkuláciu materiálu"
+        "severity": "info",
+        "detail": "area_m2 je pôdorysný priemet (287.0 m²); skutočná plocha strechy ≈ 332.3 m² (+16 %) — pre materiál použi tú"
       }
     ],
     "counts": {
       "errors": 0,
-      "warnings": 4
+      "warnings": 7,
+      "info": 1
     },
     "verdict": "WARN"
   }
