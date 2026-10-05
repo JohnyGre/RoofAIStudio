@@ -67,7 +67,8 @@ class PlaneRecord:
     id: str
     type: str                      # plochá / sedlová / valbová / neurčitá
     pitch_deg: float
-    area_m2: float = 0.0
+    area_m2: float = 0.0          # pôdorysný priemet
+    area_true_m2: Optional[float] = None   # skutočná plocha strechy (pôdorys / cos sklonu)
     azimuth_deg: Optional[float] = None
     rmse_m: Optional[float] = None
     vertices: List[List[float]] = field(default_factory=list)

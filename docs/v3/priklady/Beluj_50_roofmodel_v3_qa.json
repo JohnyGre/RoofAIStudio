@@ -1,0 +1,57 @@
+{
+  "file": "output\\v3\\Beluj_50_roofmodel_v3.json",
+  "contract_errors": [],
+  "qa": {
+    "errors": [
+      {
+        "check": "gable_shared",
+        "plane": "R1",
+        "edge": "s4",
+        "severity": "error",
+        "detail": "štít s4 leží na hrane Xh1 roviny R8 (typ h) — spoločná hrana nemôže byť štít"
+      }
+    ],
+    "warnings": [
+      {
+        "check": "plane_has_eave",
+        "plane": "R4",
+        "severity": "warning",
+        "detail": "šikmá rovina (43.9°) nemá odkvapovú hranu"
+      },
+      {
+        "check": "plane_has_eave",
+        "plane": "R5",
+        "severity": "warning",
+        "detail": "šikmá rovina (12.8°) nemá odkvapovú hranu"
+      },
+      {
+        "check": "plane_has_eave",
+        "plane": "R7",
+        "severity": "warning",
+        "detail": "šikmá rovina (41.1°) nemá odkvapovú hranu"
+      },
+      {
+        "check": "plane_has_eave",
+        "plane": "R8",
+        "severity": "warning",
+        "detail": "šikmá rovina (44.9°) nemá odkvapovú hranu"
+      },
+      {
+        "check": "plane_has_eave",
+        "plane": "R9",
+        "severity": "warning",
+        "detail": "šikmá rovina (46.8°) nemá odkvapovú hranu"
+      },
+      {
+        "check": "areas_true",
+        "severity": "warning",
+        "detail": "skutočná plocha strechy (šikmá) je 239.5 m², pôdorysný súčet 186.1 m² (+29 %) — použiť pre kalkuláciu materiálu"
+      }
+    ],
+    "counts": {
+      "errors": 1,
+      "warnings": 6
+    },
+    "verdict": "FAIL"
+  }
+}

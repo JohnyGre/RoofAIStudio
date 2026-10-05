@@ -590,7 +590,11 @@ def classify_edges(planes, **kw) -> None:
                     if min(nearest) > 0.9:
                         etype = "o"
 
-            if etype is None and abs(mid_z - z_min) < 0.20:
+            # odkvap = najnižšia hrana A ZÁROVEŇ vodorovná (vedie po vrstevnici).
+            # Stúpajúca „najnižšia" hrana je štít (audit: o4 kopíroval stúpajúcu hranu).
+            _L2 = math.hypot(b[0] - a[0], b[1] - a[1])
+            _slope_e = math.degrees(math.atan2(abs(b[2] - a[2]), max(_L2, 1e-9)))
+            if etype is None and abs(mid_z - z_min) < 0.20 and _slope_e <= 6.0:
                 etype = "o"
             if etype is None:
                 etype = "s"
@@ -798,13 +802,22 @@ def roof_outline_edges(planes, **kw):
                 break
         if on_int:
             continue
-        z = 0.0
-        # priraď k rovine, ktorá tam leží (pre výšku a výkres)
+        # nájdi rovinu, ktorá tam leží (pre výšky v OBIDVoch koncoch)
+        owner = None
+        from shapely.geometry import Point as _Pt
         for pl in planes:
-            if Polygon(pl["vertices_2d"]).distance(__import__("shapely").geometry.Point(a[0], a[1])) < 0.05:
-                z = plane_z_at(pl, (a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+            if Polygon(pl["vertices_2d"]).distance(_Pt(a[0], a[1])) < 0.05 or \
+               Polygon(pl["vertices_2d"]).distance(_Pt(b[0], b[1])) < 0.05:
+                owner = pl
                 break
-        out.append({"type": "o", "start": [a[0], a[1], round(z, 3)], "end": [b[0], b[1], round(z, 3)],
+        if owner is None:
+            continue
+        z1 = plane_z_at(owner, a[0], a[1])
+        z2 = plane_z_at(owner, b[0], b[1])
+        # odkvap vedie po vrstevnici → musí byť takmer vodorovný; inak je to štít
+        slope_deg = math.degrees(math.atan2(abs(z2 - z1), max(L, 1e-9)))
+        etype = "o" if slope_deg <= 6.0 else "s"
+        out.append({"type": etype, "start": [a[0], a[1], round(z1, 3)], "end": [b[0], b[1], round(z2, 3)],
                     "length_m": round(L, 3), "exact": False})
     return out
 

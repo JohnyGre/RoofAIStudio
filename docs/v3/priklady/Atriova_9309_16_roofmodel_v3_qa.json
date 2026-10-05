@@ -1,0 +1,19 @@
+{
+  "file": "output\\v3\\Atriova_9309_16_roofmodel_v3.json",
+  "contract_errors": [],
+  "qa": {
+    "errors": [],
+    "warnings": [
+      {
+        "check": "gaps",
+        "severity": "warning",
+        "detail": "R3↔R4: vrcholy 0.273 m od seba (nesúsnutné hrany)"
+      }
+    ],
+    "counts": {
+      "errors": 0,
+      "warnings": 1
+    },
+    "verdict": "WARN"
+  }
+}

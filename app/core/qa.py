@@ -138,6 +138,12 @@ def check_area_vs_footprint(model, max_ratio: float = 1.6) -> List[Dict[str, Any
 def run_all_checks(model) -> Dict[str, Any]:
     issues: List[Dict[str, Any]] = []
     issues += check_class_pitch(model)
+    issues += check_eave_horizontal(model)
+    issues += check_gable_on_shared_edge(model)
+    issues += check_duplicate_edges(model)
+    issues += check_edge_type_consistency(model)
+    issues += check_plane_has_eave(model)
+    issues += check_areas_true(model)
     issues += check_area_sum(model)
     issues += check_area_vs_footprint(model)
     issues += check_low_confidence(model)
@@ -151,3 +157,149 @@ def run_all_checks(model) -> Dict[str, Any]:
         "counts": {"errors": len(errors), "warnings": len(warnings)},
         "verdict": "FAIL" if errors else ("WARN" if warnings else "PASS"),
     }
+
+# ─── kontroly konzistencie hrán (audit 2026-10-05) ───────────────────────────
+
+def _seg_mid(e):
+    return ((e.start[0] + e.end[0]) / 2.0, (e.start[1] + e.end[1]) / 2.0)
+
+
+def _seg_dir(e):
+    dx, dy = e.end[0] - e.start[0], e.end[1] - e.start[1]
+    n = math.hypot(dx, dy) or 1.0
+    return dx / n, dy / n
+
+
+def _same_line(e1, e2, dist_tol: float = 0.30, ang_tol_deg: float = 8.0,
+               min_overlap_m: float = 1.0) -> bool:
+    """Ležia dve hrany na tej istej čiare (a prekrývajú sa)?"""
+    d1x, d1y = _seg_dir(e1)
+    d2x, d2y = _seg_dir(e2)
+    ang = math.degrees(math.acos(min(1.0, abs(d1x * d2x + d1y * d2y))))
+    if ang > ang_tol_deg:
+        return False
+    mx, my = _seg_mid(e2)
+    # kolmá vzdialenosť stredu e2 od línie e1
+    dist = abs(-d1y * (mx - e1.start[0]) + d1x * (my - e1.start[1]))
+    if dist > dist_tol:
+        return False
+    # prekrytie pozdĺž línie e1
+    ts = []
+    for px, py in ((e2.start[0], e2.start[1]), (e2.end[0], e2.end[1])):
+        ts.append(d1x * (px - e1.start[0]) + d1y * (py - e1.start[1]))
+    L1 = math.hypot(e1.end[0] - e1.start[0], e1.end[1] - e1.start[1])
+    lo, hi = min(ts), max(ts)
+    overlap = max(0.0, min(hi, L1) - max(lo, 0.0))
+    return overlap >= min_overlap_m
+
+
+def check_eave_horizontal(model, max_deg: float = 6.0) -> List[Dict[str, Any]]:
+    """Odvk ap musí byť takmer vodorovný (vedie po vrstevnici)."""
+    issues = []
+    for p in model.planes:
+        for e in p.edges:
+            if e.type != "o":
+                continue
+            L2 = math.hypot(e.end[0] - e.start[0], e.end[1] - e.start[1])
+            dz = abs(float(e.end[2]) - float(e.start[2]))
+            if L2 < 0.5:
+                continue
+            slope = math.degrees(math.atan2(dz, L2))
+            if slope > max_deg:
+                issues.append({"check": "eave_horizontal", "plane": p.id, "edge": e.id,
+                               "severity": "error",
+                               "detail": f"odkvap stúpa {slope:.1f}° ({dz:.2f} m / {L2:.1f} m) — skôr štít"})
+    return issues
+
+
+def check_gable_on_shared_edge(model) -> List[Dict[str, Any]]:
+    """'s' (štít) je voľná hrana — nesmie ležať na hrane inej roviny."""
+    issues = []
+    for i, p in enumerate(model.planes):
+        for e in p.edges:
+            if e.type != "s":
+                continue
+            for j, q in enumerate(model.planes):
+                if i == j:
+                    continue
+                for f in q.edges:
+                    if _same_line(e, f):
+                        issues.append({"check": "gable_shared", "plane": p.id, "edge": e.id,
+                                       "severity": "error",
+                                       "detail": f"štít {e.id} leží na hrane {f.id} roviny {q.id} "
+                                                 f"(typ {f.type}) — spoločná hrana nemôže byť štít"})
+    return issues
+
+
+def check_duplicate_edges(model, min_overlap_m: float = 1.0) -> List[Dict[str, Any]]:
+    """Tá istá fyzická hrana 2× v kontrakte (duplicitný zápis)."""
+    issues = []
+    seen = []
+    for p in model.planes:
+        for e in p.edges:
+            for (pid, eid, e0) in seen:
+                if pid == p.id and _same_line(e, e0):
+                    issues.append({"check": "duplicate_edges", "plane": p.id, "edge": e.id,
+                                   "severity": "warning",
+                                   "detail": f"hrana {e.id} je na tej istej čiare ako {eid} "
+                                             f"v tej istej rovine (duplicita)"})
+                    break
+            seen.append((p.id, e.id, e))
+    return issues
+
+
+def check_edge_type_consistency(model) -> List[Dict[str, Any]]:
+    """Tá istá hrana (čiara) musí mať rovnaký typ v oboch susedných rovinách."""
+    issues = []
+    for i, p in enumerate(model.planes):
+        for e in p.edges:
+            if e.type == "s":
+                continue
+            for j, q in enumerate(model.planes):
+                if i >= j:
+                    continue
+                for f in q.edges:
+                    if f.type == "s" or e.type == f.type:
+                        continue
+                    if _same_line(e, f):
+                        issues.append({"check": "edge_type_consistency", "plane": p.id, "edge": e.id,
+                                       "severity": "error",
+                                       "detail": f"{e.id} je '{e.type}' v {p.id}, ale {f.id} je "
+                                                 f"'{f.type}' v {q.id} — tá istá hrana"})
+    return issues
+
+
+def check_plane_has_eave(model, min_pitch_deg: float = 8.0) -> List[Dict[str, Any]]:
+    """Šikmá rovina musí mať odkvap (o)."""
+    issues = []
+    for p in model.planes:
+        if p.low_confidence or p.pitch_deg < min_pitch_deg:
+            continue
+        if not any(e.type == "o" for e in p.edges):
+            issues.append({"check": "plane_has_eave", "plane": p.id, "severity": "warning",
+                           "detail": f"šikmá rovina ({p.pitch_deg:.1f}°) nemá odkvapovú hranu"})
+    return issues
+
+
+def check_areas_true(model, tol_rel: float = 0.05) -> List[Dict[str, Any]]:
+    """Upozorni, že 'area_m2' je pôdorysný priemet, nie plocha strechy.
+
+    Skutočná plocha = pôdorys / cos(sklon). Pre kalkuláciu materiálu je to podstatný rozdiel
+    (pri 26° je to +11 %).
+    """
+    issues = []
+    total_plan = sum(p.area_m2 for p in model.planes if not p.low_confidence)
+    total_true = 0.0
+    for p in model.planes:
+        if p.low_confidence:
+            continue
+        c = math.cos(math.radians(min(89.0, float(p.pitch_deg or 0.0))))
+        total_true += p.area_m2 / c if c > 0.1 else p.area_m2
+    if total_plan > 0:
+        rel = (total_true - total_plan) / total_plan
+        if rel > tol_rel:
+            issues.append({"check": "areas_true", "severity": "warning",
+                           "detail": f"skutočná plocha strechy (šikmá) je {total_true:.1f} m², "
+                                     f"pôdorysný súčet {total_plan:.1f} m² (+{100*rel:.0f} %) — "
+                                     f"použiť pre kalkuláciu materiálu"})
+    return issues

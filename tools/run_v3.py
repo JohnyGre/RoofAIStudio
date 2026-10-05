@@ -336,8 +336,27 @@ def main() -> int:
                     planes_mid = pl
                     break
         if planes_mid is not None:
-            pl["edges"] = [x for x in pl["edges"] if x["type"] != "o"]
-            pl["edges"].append({"id": f"o{len(pl['edges'])+1}", "type": "o", "length_m": e["length_m"],
+            # nepridávaj, ak na tej istej čiare už hrana existuje (inak vznikne duplicita)
+            def _same(e1, e2, dist_tol=0.30, ang_tol=8.0):
+                import math as _m
+                dx1, dy1 = e1["end"][0] - e1["start"][0], e1["end"][1] - e1["start"][1]
+                n1 = _m.hypot(dx1, dy1) or 1.0
+                dx1, dy1 = dx1 / n1, dy1 / n1
+                dx2, dy2 = e2["end"][0] - e2["start"][0], e2["end"][1] - e2["start"][1]
+                n2 = _m.hypot(dx2, dy2) or 1.0
+                dx2, dy2 = dx2 / n2, dy2 / n2
+                ang = _m.degrees(_m.acos(min(1.0, abs(dx1 * dx2 + dy1 * dy2))))
+                if ang > ang_tol:
+                    return False
+                mx = (e2["start"][0] + e2["end"][0]) / 2.0
+                my = (e2["start"][1] + e2["end"][1]) / 2.0
+                return abs(-dy1 * (mx - e1["start"][0]) + dx1 * (my - e1["start"][1])) <= dist_tol
+
+            if any(_same(x, e) for x in pl["edges"]):
+                continue
+            pl["edges"] = [x for x in pl["edges"] if x["type"] != "o" or not _same(x, e)]
+            pl["edges"].append({"id": f"o{len(pl['edges'])+1}", "type": e["type"],
+                                "length_m": e["length_m"],
                                 "start": e["start"], "end": e["end"], "exact": False})
     print(f"      odkvapy z obrysu strechy: {len(o_edges)} úsekov")
     _ring = engine.roof_outline_ring(planes)
@@ -369,12 +388,111 @@ def main() -> int:
     print(f"      presné hrany z priesečníc: " + ", ".join(
         f"{t}={n}" for t, n in _C(e['type'] for e in ex_edges).items()) or "      presné hrany: 0")
 
+    # Deduplikácia: ak existuje presná hrana z priesečnice, polygónová hrana na tej istej
+    # čiare sa odstráni (audit: tie isté hrany boli v kontrakte 2-3x)
+    def _same_line_lite(e1, e2, dist_tol=0.30, ang_tol=8.0, min_overlap=1.0):
+        import math as _m
+
+        def d(e):
+            dx, dy = e["end"][0] - e["start"][0], e["end"][1] - e["start"][1]
+            n = _m.hypot(dx, dy) or 1.0
+            return dx / n, dy / n
+        d1, d2 = d(e1), d(e2)
+        ang = _m.degrees(_m.acos(min(1.0, abs(d1[0] * d2[0] + d1[1] * d2[1]))))
+        if ang > ang_tol:
+            return False
+        mx = (e2["start"][0] + e2["end"][0]) / 2.0
+        my = (e2["start"][1] + e2["end"][1]) / 2.0
+        dist = abs(-d1[1] * (mx - e1["start"][0]) + d1[0] * (my - e1["start"][1]))
+        if dist > dist_tol:
+            return False
+        ts = [d1[0] * (p[0] - e1["start"][0]) + d1[1] * (p[1] - e1["start"][1])
+              for p in (e2["start"], e2["end"])]
+        L1 = _m.hypot(e1["end"][0] - e1["start"][0], e1["end"][1] - e1["start"][1])
+        return max(0.0, min(max(ts), L1) - max(min(ts), 0.0)) >= min_overlap
+
+    for _i, _pl in enumerate(planes):
+        _ex = exact_by_plane.get(_i, [])
+        if not _ex:
+            continue
+        _keep = []
+        for _e in _pl.get("edges", []):
+            # kanonický záznam je X (z priesečnice); engine hrany na tej istej čiare
+            # sa vyhodia — aj keď majú exact=True (inak vznikali duplicity v kontrakte)
+            if any(_same_line_lite(_x, _e) for _x in _ex):
+                continue
+            _keep.append(_e)
+        _pl["edges"] = _keep
+
+    # ── finálna konzistencia typov hrán (audit 2026-10-05) ─────────────────
+    # 1) odkvap musí byť vodorovný (inak je to štít) — Z sa berie z vlastnej roviny
+    for _pi, _pl in enumerate(planes):
+        for _e in _pl.get("edges", []):
+            if _e.get("type") != "o":
+                continue
+            _L = math.hypot(_e["end"][0] - _e["start"][0], _e["end"][1] - _e["start"][1])
+            _sl = math.degrees(math.atan2(abs(_e["end"][2] - _e["start"][2]), max(_L, 1e-9)))
+            if _sl > 6.0:
+                _e["type"] = "s"
+                _e["id"] = "s" + _e["id"][1:]
+
+    # 1b) 's' hrana ležiaca na PRESNEJ hrane (X) inej roviny prevezme jej typ —
+    #     spoločná hrana nemôže byť štít ani v jednom z páru (audit, Beluj R7/R8)
+    for _i, _pl in enumerate(planes):
+        _others = [e for _j, _ex in exact_by_plane.items() if _j != _i for e in _ex]
+        if not _others:
+            continue
+        for _e in _pl.get("edges", []):
+            if _e.get("type") != "s":
+                continue
+            for _f in _others:
+                if _same_line_lite(_e, _f):
+                    _e["type"] = _f["type"]
+                    _e["id"] = _f["type"] + _e["id"][1:]
+                    break
+
+    # 2) spoločná hrana nesmie byť 's' → pretypuj podľa konvexnosti oboch rovín
+    import numpy as _np
+    _seen_pairs = set()
+    for _i, _pl in enumerate(planes):
+        for _e in _pl.get("edges", []):
+            if _e.get("type") != "s":
+                continue
+            for _j, _q in enumerate(planes):
+                if _i >= _j or (_i, _j) in _seen_pairs:
+                    continue
+                for _f in _q.get("edges", []):
+                    if _f.get("type") != "s":
+                        continue
+                    if not _same_line_lite(_e, _f):
+                        continue
+                    _seen_pairs.add((_i, _j))
+                    _mid = _np.array([(_e["start"][0] + _e["end"][0]) / 2.0,
+                                      (_e["start"][1] + _e["end"][1]) / 2.0,
+                                      (_e["start"][2] + _e["end"][2]) / 2.0])
+                    _dirv = _np.array([_e["end"][0] - _e["start"][0],
+                                       _e["end"][1] - _e["start"][1],
+                                       _e["end"][2] - _e["start"][2]])
+                    _conv = engine._fold_convex(_pl, _q, _mid, _dirv)
+                    if _conv is True:
+                        _t = engine._ridge_or_hip(_pl, _q)
+                    elif _conv is False:
+                        _t = "u"
+                    else:
+                        _t = "n"
+                    _e["type"] = _t
+                    _e["id"] = _t + _e["id"][1:]
+                    _f["type"] = _t
+                    _f["id"] = _t + _f["id"][1:]
+
     crec = []
     for i, pl in enumerate(planes, 1):
         slope = pl["slope_deg"]
         ptype = engine.classify_plane_subtype(pl)
+        _cos = math.cos(math.radians(min(89.0, slope))) if slope else 1.0
         crec.append(contract.PlaneRecord(
             id=f"R{i}", type=ptype, pitch_deg=slope, area_m2=round(pl["area_m2"], 2),
+            area_true_m2=round(pl["area_m2"] / _cos, 2) if _cos > 0.01 else round(pl["area_m2"], 2),
             azimuth_deg=pl["azimuth_deg"], rmse_m=pl["rmse_m"],
             vertices=[list(v) for v in pl.get("vertices_3d", [])],
             edges=[contract.EdgeRecord(**{k: e[k] for k in ("id", "type", "length_m", "start", "end", "exact")})

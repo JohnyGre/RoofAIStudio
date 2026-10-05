@@ -1,0 +1,19 @@
+{
+  "file": "output\\v3\\Atriova_9309_16_Trnava_roofmodel_v3.json",
+  "contract_errors": [],
+  "qa": {
+    "errors": [],
+    "warnings": [
+      {
+        "check": "areas_true",
+        "severity": "warning",
+        "detail": "skutočná plocha strechy (šikmá) je 145.6 m², pôdorysný súčet 131.1 m² (+11 %) — použiť pre kalkuláciu materiálu"
+      }
+    ],
+    "counts": {
+      "errors": 0,
+      "warnings": 1
+    },
+    "verdict": "WARN"
+  }
+}

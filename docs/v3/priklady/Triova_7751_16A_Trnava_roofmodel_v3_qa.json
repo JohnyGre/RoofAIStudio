@@ -3,11 +3,35 @@
   "contract_errors": [],
   "qa": {
     "errors": [],
-    "warnings": [],
+    "warnings": [
+      {
+        "check": "plane_has_eave",
+        "plane": "R4",
+        "severity": "warning",
+        "detail": "šikmá rovina (30.7°) nemá odkvapovú hranu"
+      },
+      {
+        "check": "plane_has_eave",
+        "plane": "R5",
+        "severity": "warning",
+        "detail": "šikmá rovina (30.6°) nemá odkvapovú hranu"
+      },
+      {
+        "check": "plane_has_eave",
+        "plane": "R8",
+        "severity": "warning",
+        "detail": "šikmá rovina (30.7°) nemá odkvapovú hranu"
+      },
+      {
+        "check": "areas_true",
+        "severity": "warning",
+        "detail": "skutočná plocha strechy (šikmá) je 332.3 m², pôdorysný súčet 287.0 m² (+16 %) — použiť pre kalkuláciu materiálu"
+      }
+    ],
     "counts": {
       "errors": 0,
-      "warnings": 0
+      "warnings": 4
     },
-    "verdict": "PASS"
+    "verdict": "WARN"
   }
 }
