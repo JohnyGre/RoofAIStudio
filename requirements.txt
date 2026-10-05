@@ -13,6 +13,9 @@ laspy[lazrs]
 pyproj
 pdal
 
+# Vizualizacia (run_v3 topdown PNG)
+matplotlib
+
 # AI
 ultralytics
 torch

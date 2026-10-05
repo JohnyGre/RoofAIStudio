@@ -673,6 +673,30 @@ class PipelineWorker(QThread):
         with open(base + '_meta.json', 'w', encoding='utf-8') as f:
             json.dump(meta, f, indent=2, ensure_ascii=False)
 
+        # v3: verzovany kontrakt + QA gate (fail-soft - nikdy nesmie zhodiť beh)
+        try:
+            from app.core import contract as _contract
+            from app.plugins.contract_exporter import export_contract
+            from app.core import qa as _qa
+            _model = _contract.from_legacy_meta(meta)
+            _model.sources = [
+                _contract.SourceRecord(id='lidar_lls', role='lidar', crs='EPSG:8353',
+                                       acquired_year=2018, license='CC BY 4.0',
+                                       note='ZBGIS/MAPKA LLS 1. cyklus 2017-2023'),
+                _contract.SourceRecord(id='ortofoto_zbgis', role='vision', crs='EPSG:3857',
+                                       acquired_year=2024, license='CC BY 4.0',
+                                       note='ZBGIS ortofotomozaika 3. cyklus'),
+            ]
+            _model.roof_area_m2 = float(total) if total else _model.roof_area_m2
+            export_contract(_model, base + '_roofmodel_v3.json')
+            _qa_res = _qa.run_all_checks(_model)
+            with open(base + '_qa.json', 'w', encoding='utf-8') as _fq:
+                json.dump({'contract_errors': _contract.validate(_model), 'qa': _qa_res},
+                          _fq, indent=2, ensure_ascii=False)
+            self.log(f'  v3 kontrakt: {os.path.basename(base)}_roofmodel_v3.json (QA: {_qa_res["verdict"]})')
+        except Exception as _ex:
+            self.log(f'  v3 kontrakt/QA preskoceny: {_ex}')
+
         summary = (f'Address: {display}\n'
                    f'GPS: {info["lat"]:.6f}N, {info["lon"]:.6f}E\n'
                    f'Plocha plášťa: {total} m²\n'

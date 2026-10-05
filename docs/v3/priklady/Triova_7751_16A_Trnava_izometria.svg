@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900">
+<defs><marker id="a" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#111"/></marker><pattern id="mesh" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M10 0 L0 0 0 10" fill="none" stroke="#dcdcdc" stroke-width="0.6"/></pattern></defs>
+<rect width="1400" height="900" fill="#ffffff"/>
+<text x="40" y="46" font-family="Arial" font-size="20" font-weight="bold">Triova_7751_16A_Trnava</text>
+<text x="40" y="70" font-family="Arial" font-size="13" fill="#555">Izometrický výkres strechy — roviny a hrany (S-JTSK/JTSK03, Bpv) · výška z LiDARu</text>
+<polygon points="150.0,673.2 158.0,626.0 328.3,632.1 189.7,629.1 159.7,643.6 184.4,670.0 240.2,680.4 249.6,697.2 232.8,705.6 225.9,679.6" fill="#f4f4f4" fill-opacity="0.95" stroke="#b9b9b9" stroke-width="1"/>
+<polygon points="163.3,634.6 282.4,634.2 292.0,668.6 193.7,674.9" fill="#f4f4f4" fill-opacity="0.95" stroke="#b9b9b9" stroke-width="1"/>
+<polygon points="312.4,664.0 324.8,664.9 303.4,692.2 314.1,728.7 281.0,729.9 286.7,681.2" fill="#f4f4f4" fill-opacity="0.95" stroke="#b9b9b9" stroke-width="1"/>
+<polygon points="245.9,727.7 249.1,690.1 287.2,677.2 281.0,729.3" fill="#f4f4f4" fill-opacity="0.95" stroke="#b9b9b9" stroke-width="1"/>
+<polygon points="164.3,671.4 193.7,673.2 283.3,676.1" fill="#f4f4f4" fill-opacity="0.95" stroke="#b9b9b9" stroke-width="1"/>
+<polygon points="294.3,668.0 282.4,634.3 314.4,620.0" fill="#f4f4f4" fill-opacity="0.95" stroke="#b9b9b9" stroke-width="1"/>
+<polygon points="338.0,650.9 324.0,660.0 305.4,666.4" fill="#f4f4f4" fill-opacity="0.95" stroke="#b9b9b9" stroke-width="1"/>
+<polygon points="194.0,673.5 158.3,670.6 163.3,633.8" fill="#f4f4f4" fill-opacity="0.95" stroke="#b9b9b9" stroke-width="1"/>
+<polygon points="321.3,686.2 316.8,651.3 335.6,659.4" fill="#f4f4f4" fill-opacity="0.95" stroke="#b9b9b9" stroke-width="1"/>
+<polygon points="350.4,643.4 312.5,658.3 314.4,619.7" fill="#f4f4f4" fill-opacity="0.95" stroke="#b9b9b9" stroke-width="1"/>
+<polygon points="250.2,727.8 282.7,729.8 312.3,730.0" fill="#f4f4f4" fill-opacity="0.95" stroke="#b9b9b9" stroke-width="1"/>
+<polygon points="150.0,673.2 158.0,626.0 328.3,632.1 189.7,629.1 159.7,643.6 184.4,670.0 240.2,680.4 249.6,697.2 232.8,705.6 225.9,679.6" fill="url(#mesh)" stroke="none"/>
+<polygon points="163.3,634.6 282.4,634.2 292.0,668.6 193.7,674.9" fill="url(#mesh)" stroke="none"/>
+<polygon points="312.4,664.0 324.8,664.9 303.4,692.2 314.1,728.7 281.0,729.9 286.7,681.2" fill="url(#mesh)" stroke="none"/>
+<polygon points="245.9,727.7 249.1,690.1 287.2,677.2 281.0,729.3" fill="url(#mesh)" stroke="none"/>
+<polygon points="164.3,671.4 193.7,673.2 283.3,676.1" fill="url(#mesh)" stroke="none"/>
+<polygon points="294.3,668.0 282.4,634.3 314.4,620.0" fill="url(#mesh)" stroke="none"/>
+<polygon points="338.0,650.9 324.0,660.0 305.4,666.4" fill="url(#mesh)" stroke="none"/>
+<polygon points="194.0,673.5 158.3,670.6 163.3,633.8" fill="url(#mesh)" stroke="none"/>
+<polygon points="321.3,686.2 316.8,651.3 335.6,659.4" fill="url(#mesh)" stroke="none"/>
+<polygon points="350.4,643.4 312.5,658.3 314.4,619.7" fill="url(#mesh)" stroke="none"/>
+<polygon points="250.2,727.8 282.7,729.8 312.3,730.0" fill="url(#mesh)" stroke="none"/>
+<line x1="232.8" y1="705.6" x2="225.9" y2="679.6" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="282.4" y1="634.2" x2="292.0" y2="668.6" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="193.7" y1="674.9" x2="163.3" y2="634.6" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="193.8" y1="675.3" x2="283.3" y2="679.2" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="287.1" y1="676.9" x2="293.7" y2="669.7" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="194.2" y1="673.3" x2="283.2" y2="676.2" stroke="#111" stroke-width="3.0" stroke-linecap="round"/>
+<line x1="282.4" y1="634.7" x2="291.7" y2="667.3" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="164.3" y1="634.2" x2="194.1" y2="672.2" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="314.1" y1="728.7" x2="281.0" y2="729.9" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="281.0" y1="729.9" x2="286.7" y2="681.2" stroke="#111" stroke-width="3.0" stroke-linecap="round"/>
+<line x1="287.1" y1="676.9" x2="293.7" y2="669.7" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="287.3" y1="676.1" x2="281.6" y2="729.4" stroke="#111" stroke-width="3.0" stroke-linecap="round"/>
+<line x1="295.5" y1="669.7" x2="321.0" y2="661.0" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="282.7" y1="729.8" x2="313.1" y2="730.1" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="287.2" y1="677.2" x2="281.0" y2="729.3" stroke="#111" stroke-width="3.0" stroke-linecap="round"/>
+<line x1="281.0" y1="729.3" x2="245.9" y2="727.7" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="245.9" y1="727.5" x2="248.2" y2="701.0" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="287.3" y1="676.1" x2="281.6" y2="729.4" stroke="#111" stroke-width="3.0" stroke-linecap="round"/>
+<line x1="279.0" y1="675.9" x2="284.1" y2="676.2" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="245.6" y1="727.7" x2="280.5" y2="729.7" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="283.3" y1="668.0" x2="181.4" y2="680.2" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="194.2" y1="673.3" x2="283.2" y2="676.2" stroke="#111" stroke-width="3.0" stroke-linecap="round"/>
+<line x1="279.0" y1="675.9" x2="284.1" y2="676.2" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="193.6" y1="673.2" x2="159.0" y2="671.3" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="294.3" y1="659.2" x2="282.4" y2="643.0" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="282.4" y1="634.7" x2="291.7" y2="667.3" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="295.3" y1="669.4" x2="311.6" y2="661.2" stroke="#111" stroke-width="3.0" stroke-linecap="round"/>
+<line x1="311.7" y1="658.5" x2="314.1" y2="619.6" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="324.0" y1="660.0" x2="305.4" y2="666.4" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="295.5" y1="669.7" x2="321.0" y2="661.0" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="295.3" y1="669.4" x2="311.6" y2="661.2" stroke="#111" stroke-width="3.0" stroke-linecap="round"/>
+<line x1="350.4" y1="646.0" x2="314.5" y2="660.1" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="194.0" y1="673.5" x2="158.3" y2="670.6" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="158.3" y1="670.6" x2="163.3" y2="633.8" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="163.3" y1="633.8" x2="194.0" y2="673.5" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="164.3" y1="634.2" x2="194.1" y2="672.2" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="193.6" y1="673.2" x2="159.0" y2="671.3" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="321.3" y1="686.2" x2="316.8" y2="651.3" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="316.8" y1="651.3" x2="335.6" y2="659.4" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="335.6" y1="659.4" x2="321.3" y2="686.2" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="312.5" y1="658.3" x2="314.4" y2="619.7" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="350.4" y1="651.4" x2="312.5" y2="650.3" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="311.7" y1="658.5" x2="314.1" y2="619.6" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="350.4" y1="646.0" x2="314.5" y2="660.1" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="282.7" y1="729.8" x2="312.3" y2="730.0" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="312.3" y1="730.0" x2="250.2" y2="727.8" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="282.7" y1="729.8" x2="313.1" y2="730.1" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="245.6" y1="727.7" x2="280.5" y2="729.7" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+<line x1="232.3" y1="674.1" x2="280.3" y2="764.1" stroke="#111" stroke-width="0.9"/>
+<circle cx="232.3" cy="674.1" r="2.6" fill="#111"/>
+<text x="280.3" y="764.1" font-family="Arial" font-size="16" font-weight="bold" text-anchor="middle">Okap</text>
+<line x1="287.0" y1="651.0" x2="407.0" y2="597.0" stroke="#111" stroke-width="0.9"/>
+<circle cx="287.0" cy="651.0" r="2.6" fill="#111"/>
+<text x="407.0" y="597.0" font-family="Arial" font-size="16" font-weight="bold" text-anchor="middle">Úžľabie</text>
+<line x1="263.0" y1="728.7" x2="143.0" y2="764.7" stroke="#111" stroke-width="0.9"/>
+<circle cx="263.0" cy="728.7" r="2.6" fill="#111"/>
+<text x="143.0" y="764.7" font-family="Arial" font-size="16" font-weight="bold" text-anchor="middle">Nárožie</text>
+<line x1="284.4" y1="702.8" x2="344.4" y2="612.8" stroke="#111" stroke-width="0.9"/>
+<circle cx="284.4" cy="702.8" r="2.6" fill="#111"/>
+<text x="344.4" y="612.8" font-family="Arial" font-size="16" font-weight="bold" text-anchor="middle">Hrebeň</text>
+<line x1="195.0" y1="651.3" x2="165.7" y2="649.4" stroke="#111" stroke-width="0.9" marker-start="url(#a)" marker-end="url(#a)"/>
+<text x="181.6" y="630.6" font-family="Arial" font-size="13" text-anchor="middle">28.77 m</text>
+<line x1="280.7" y1="646.2" x2="178.8" y2="658.3" stroke="#111" stroke-width="0.9" marker-start="url(#a)" marker-end="url(#a)"/>
+<text x="227.4" y="632.6" font-family="Arial" font-size="13" text-anchor="middle">14.16 m</text>
+<line x1="290.6" y1="646.6" x2="192.2" y2="653.0" stroke="#111" stroke-width="0.9" marker-start="url(#a)" marker-end="url(#a)"/>
+<text x="240.1" y="630.0" font-family="Arial" font-size="13" text-anchor="middle">13.39 m</text>
+<line x1="265.4" y1="673.8" x2="259.7" y2="727.1" stroke="#111" stroke-width="0.9" marker-start="url(#a)" marker-end="url(#a)"/>
+<text x="242.9" y="698.3" font-family="Arial" font-size="13" text-anchor="middle">12.58 m</text>
+<line x1="265.4" y1="673.8" x2="259.7" y2="727.1" stroke="#111" stroke-width="0.9" marker-start="url(#a)" marker-end="url(#a)"/>
+<text x="242.9" y="698.3" font-family="Arial" font-size="13" text-anchor="middle">12.58 m</text>
+<line x1="265.3" y1="674.6" x2="259.1" y2="726.7" stroke="#111" stroke-width="0.9" marker-start="url(#a)" marker-end="url(#a)"/>
+<text x="242.6" y="698.3" font-family="Arial" font-size="13" text-anchor="middle">12.37 m</text>
+<text x="322.5" y="659.1" font-family="Arial" font-size="15" text-anchor="middle" fill="#111">31°</text>
+<g transform="translate(1300,790)"><line x1="0" y1="0" x2="0" y2="-46" stroke="#111" stroke-width="1.6"/><polygon points="0,-56 -6,-40 6,-40" fill="#111"/><text x="0" y="18" font-family="Arial" font-size="13" text-anchor="middle">S</text></g>
+<g transform="translate(60,830)"><line x1="0" y1="0" x2="140" y2="0" stroke="#111" stroke-width="1.2"/><line x1="0" y1="-5" x2="0" y2="5" stroke="#111" stroke-width="1.2"/><line x1="140" y1="-5" x2="140" y2="5" stroke="#111" stroke-width="1.2"/><text x="70" y="-8" font-family="Arial" font-size="12" text-anchor="middle">10 m</text></g>
+</svg>

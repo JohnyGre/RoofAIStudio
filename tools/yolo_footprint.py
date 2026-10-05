@@ -73,37 +73,18 @@ if best is None:
     sys.exit(1)
 
 j = best
-mask = r.masks[j].data[0].cpu().numpy().astype(np.uint8)
 conf = float(r.boxes[j].conf[0])
 print(f"Vybrata maska: [{j}] conf={conf:.3f}, dist={best_dist:.0f} px²")
 
-# Maska je 640x640 (resized) - treba skalovat spat na 4096x4096
-# Ultralytics masky su v pôvodnom rozlíšení? Kontrola: mask.shape = (640,640)
-# Pravdepodobne su v rozliseni obrazka po resize. Zistime scale.
-# r.orig_shape = (H, W) = (4096, 4096); mask je 640x640 -> scale = 4096/640
-orig_h, orig_w = r.orig_shape
-mh, mw = mask.shape
-sx = orig_w / mw
-sy = orig_h / mh
-print(f"Maska {mw}x{mh}, orig {orig_w}x{orig_h}, scale ({sx:.1f}, {sy:.1f})")
-
-# Upscale masky do orig rozlisenia
-mask_full = cv2.resize(mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
-
-# Kontury -> polygon (najvacsi kontur)
-contours, _ = cv2.findContours(mask_full, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-biggest = max(contours, key=cv2.contourArea)
-print(f"Kontur: {len(biggest)} bodov, area {cv2.contourArea(biggest):.0f} px")
-
-# Zjednodus (approxPolyDP)
-perim = cv2.arcLength(biggest, True)
-poly = cv2.approxPolyDP(biggest, 0.01 * perim, True)
-print(f"Po zjednoduseni: {len(poly)} bodov")
+# Ziskaj polygon priamo z `results.masks.xy`
+# Polygon je v suradniciach povodneho obrazka, bez postprocessingu.
+poly = r.masks.xy[j]
+print(f"Ziskany RAW YOLO polygon: {len(poly)} bodov")
 
 # Transformuj do S-JTSK
 footprint = []
 for pt in poly:
-    px, py = float(pt[0][0]), float(pt[0][1])
+    px, py = float(pt[0]), float(pt[1])
     x5514, y5514 = px_to_sjtsk(px, py)
     footprint.append([round(x5514, 2), round(y5514, 2)])
 
@@ -132,7 +113,7 @@ with open(out_json, "w", encoding="utf-8") as f:
 print(f"\nJSON: {out_json}")
 
 # Uloz masku PNG (orezana na budovu)
-x0, y0, x1, y1 = r.boxes[j].xyxy[0].tolist()
-crop = mask_full[int(y0):int(y1), int(x0):int(x1)]
-cv2.imencode(".png", crop * 255)[1].tofile(os.path.join(OUT, "atriova_16H_footprint_mask.png"))
-print(f"Mask PNG: output/atriova_16H_footprint_mask.png")
+# x0, y0, x1, y1 = r.boxes[j].xyxy[0].tolist()
+# crop = mask_full[int(y0):int(y1), int(x0):int(x1)]
+# cv2.imencode(".png", crop * 255)[1].tofile(os.path.join(OUT, "atriova_16H_footprint_mask.png"))
+# print(f"Mask PNG: output/atriova_16H_footprint_mask.png")

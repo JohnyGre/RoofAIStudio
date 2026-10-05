@@ -1,0 +1,13 @@
+{
+  "file": "output\\v3\\Triova_7751_16A_Trnava_roofmodel_v3.json",
+  "contract_errors": [],
+  "qa": {
+    "errors": [],
+    "warnings": [],
+    "counts": {
+      "errors": 0,
+      "warnings": 0
+    },
+    "verdict": "PASS"
+  }
+}

@@ -10,3 +10,11 @@ venv/
 # Dáta a výsledky
 data/
 output/
+
+# IDE
+.idea/
+
+# velke vystupy (necommitovat)
+output/v3/*.tif
+*.pgw
+

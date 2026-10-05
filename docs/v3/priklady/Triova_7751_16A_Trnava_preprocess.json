@@ -1,0 +1,27 @@
+{
+  "name": "Triova_7751_16A_Trnava",
+  "size_px": [
+    4096,
+    4096
+  ],
+  "bbox_3857": [
+    1957594.4172613816,
+    6172887.740304284,
+    1957662.3193136044,
+    6172955.6423565075
+  ],
+  "crs_raster": "EPSG:3857",
+  "crs_vektor": "EPSG:8353",
+  "model": "roof_gmaps_v2_last.pt",
+  "tile": 640,
+  "overlap": 96,
+  "class_counts": {
+    "slope_flat": 28
+  },
+  "outputs": {
+    "ortho_tif": "Triova_7751_16A_Trnava_ortho.tif",
+    "world_file": "Triova_7751_16A_Trnava_ortho.pgw",
+    "masky_tif": "Triova_7751_16A_Trnava_masky.tif",
+    "masky_geojson": "Triova_7751_16A_Trnava_masky.geojson"
+  }
+}
