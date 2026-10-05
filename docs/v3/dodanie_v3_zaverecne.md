@@ -1,5 +1,22 @@
 # RoofAIStudio v3 — záverečné doručenie
 
+## Repozitár (GitHub)
+
+**<https://github.com/JohnyGre/RoofAIStudio>** (branch `master`) — všetko, čo iný agent potrebuje na čítanie a spustenie:
+
+| Vstupný bod | Čo obsahuje |
+|---|---|
+| [README.md](https://github.com/JohnyGre/RoofAIStudio/blob/master/README.md) | stav (QA 0/0, regresia PASS), rýchly štart, štruktúra |
+| [README_V3.md](https://github.com/JohnyGre/RoofAIStudio/blob/master/README_V3.md) | architektúra zdrojov, spustenie, mapa súborov, schéma kontraktu, kritériá |
+| [docs/v3/](https://github.com/JohnyGre/RoofAIStudio/tree/master/docs/v3) | doručená dokumentácia + [vzorky výstupov](https://github.com/JohnyGre/RoofAIStudio/tree/master/docs/v3/priklady) |
+| [docs/v3/testovacie_adresy.md](https://github.com/JohnyGre/RoofAIStudio/blob/master/docs/v3/testovacie_adresy.md) | overené adresy (GPS, LAZ dlaždice, výsledky) |
+
+Overenie pre agenta: `tools\ci.cmd` → očakáva `CI OK` + `PASS` na 3 adresách.
+
+Commity: [ab606a8](https://github.com/JohnyGre/RoofAIStudio/commit/ab606a8) (spúšťač + gitignore) · [a3b1d6f](https://github.com/JohnyGre/RoofAIStudio/commit/a3b1d6f) (README) · [580eaf4](https://github.com/JohnyGre/RoofAIStudio/commit/580eaf4) (adresy) · [b0d410a](https://github.com/JohnyGre/RoofAIStudio/commit/b0d410acb628805fdd40ab8368c9978278046757) (celý v3 pipeline).
+
+V repozitári zámerne nie sú (veľkosť/licencie): LAZ mračná, GeoTIFFy, veľké PNG, natrénované modely.
+
 ## Čo je hotové a overené
 
 | Oblasť | Stav | Dôkaz |
