@@ -18,3 +18,8 @@ output/
 output/v3/*.tif
 *.pgw
 
+
+# modely a treningove behy (velke)
+*.pt
+runs/
+
