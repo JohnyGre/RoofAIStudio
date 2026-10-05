@@ -48,6 +48,7 @@ app/core/
   contract.py      # verzovaný dátový kontrakt (schema 3.0.0) + validácia
   engine.py        # geometrický engine: segmentácia, roviny, hrany, komíny, topológia
   fusion.py        # deterministická fúzia zdrojov (priority, konflikty, flagy)
+  edges.py         # most desktop -> kontrakt: klasifikované hrany h/n/u z priesečníc
   gis.py           # obrys budovy (OSM + pripravený ZBGIS), cache-first
   ortho.py         # ZBGIS WMS snímka + prekrytie geometrie
   preprocess.py    # GeoTIFF + dlaždicové masky + GeoJSON (zrozumiteľný formát)
@@ -127,3 +128,4 @@ izometrický výkres (SVG), masky (GeoJSON), preprocess meta.
 - ZBGIS ortofoto a mračno bodov: **CC BY 4.0** (GKÚ Bratislava) — pri publikácii uviesť zdroj.
 - OpenStreetMap obrysy: **ODbL**.
 - Beží lokálne; žiadne dáta sa neposielajú do cloudu (okrem voliteľného vizuálneho posúdenia).
+

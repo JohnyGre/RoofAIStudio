@@ -126,6 +126,7 @@ def topdown_mesh(planes, grid=0.5):
         nx = int(math.ceil((gx1 - gx0) / grid))
         ny = int(math.ceil((gy1 - gy0) / grid))
 
+    idx_of = {id(p): i for i, p in enumerate(planes)}   # index zdrojovej roviny (pre hrany v kontrakte)
     h2d = []
     for pl in planes:
         h = concave_hull(MultiPoint(pl["pts"][:, :2]), ratio=0.05).simplify(0.35, preserve_topology=True)
@@ -187,7 +188,8 @@ def topdown_mesh(planes, grid=0.5):
             for j in range(kk):
                 faces.append((base + j, base + (j+1) % kk, ci))
             plane_areas.append({"slope": round(pl["slope"], 1), "az": round(pl["az"], 1),
-                                "area_m2": round(a3d, 1), "rmse_m": round(pl["rmse"], 4)})
+                                "area_m2": round(a3d, 1), "rmse_m": round(pl["rmse"], 4),
+                                "src": idx_of[id(pl)]})
     return verts, faces, plane_areas
 
 
@@ -688,6 +690,14 @@ class PipelineWorker(QThread):
                                        note='ZBGIS ortofotomozaika 3. cyklus'),
             ]
             _model.roof_area_m2 = float(total) if total else _model.roof_area_m2
+            # klasifikované hrany (h/n/u z priesečníc rovín) — fail-soft, kontrakt ostane aj bez nich
+            try:
+                from app.core import edges as _edges
+                _er = _edges.add_edges_from_desktop(_model, plane_areas, planes)
+                self.log(f'  hrany v kontrakte: {_er["edges_attached"]}/{_er["edges_found"]} {_er["by_type"]}'
+                         + (f' ({_er["note"]})' if _er.get("note") else ''))
+            except Exception as _ee:
+                self.log(f'  hrany preskocene: {_ee}')
             export_contract(_model, base + '_roofmodel_v3.json')
             _qa_res = _qa.run_all_checks(_model)
             with open(base + '_qa.json', 'w', encoding='utf-8') as _fq:
