@@ -3,17 +3,13 @@
   "contract_errors": [],
   "qa": {
     "errors": [],
-    "warnings": [
-      {
-        "check": "areas_true",
-        "severity": "warning",
-        "detail": "skutočná plocha strechy (šikmá) je 145.6 m², pôdorysný súčet 131.1 m² (+11 %) — použiť pre kalkuláciu materiálu"
-      }
-    ],
+    "warnings": [],
+    "info": [],
     "counts": {
       "errors": 0,
-      "warnings": 1
+      "warnings": 0,
+      "info": 0
     },
-    "verdict": "WARN"
+    "verdict": "PASS"
   }
 }
