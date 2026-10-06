@@ -52,7 +52,7 @@ check("stúpajúci odkvap R1.o4 sa zachytí", any(i["plane"] == "R1" and i["edge
 check("vodorovné odkvapy (R2.o3, R3.o1, R4.o1) nie sú označené",
       not any((i["plane"], i["edge"]) in {("R2", "o3"), ("R3", "o1"), ("R4", "o1")} for i in eave))
 
-gs = qa.check_gable_shared(model)
+gs = qa.check_gable_on_shared_edge(model)
 planes_hit = {(i["plane"], i["edge"]) for i in gs}
 check("štít R3.s2 na úžľabí R1/R3", ("R3", "s2") in planes_hit, str(planes_hit))
 check("štít R4.s2 na nároží R3/R4", ("R4", "s2") in planes_hit, str(planes_hit))
@@ -76,8 +76,12 @@ check("info o skutočnej ploche ~145,6 m²", len(at) == 1 and "145." in at[0]["d
 check("areas_true je len informácia (severity=info)", at and at[0]["severity"] == "info")
 
 res = qa.run_all_checks(model)
-check("verdikt WARN, 0 chýb", res["verdict"] == "WARN" and res["counts"]["errors"] == 0, str(res["counts"]))
-check("info nezvyšuje počet varovaní", res["counts"]["info"] == 1)
+check("stav pred opravou: verdikt FAIL (pôvodné QA tu hlásilo PASS)", res["verdict"] == "FAIL", str(res["counts"]))
+check("chyby = stúpajúci odkvap + 2 štíty na cudzej hrane",
+      sorted((i["check"], i["plane"]) for i in res["errors"]) ==
+      [("eave_horizontal", "R1"), ("gable_shared", "R3"), ("gable_shared", "R4")],
+      str([(i["check"], i["plane"]) for i in res["errors"]]))
+check("info (plocha) nezvyšuje počet varovaní", res["counts"]["info"] == 1)
 
 # ---------------------------------------------------------------- čistá sedlová
 print("čistá sedlová strecha (bez falošných poplachov)")
@@ -113,11 +117,24 @@ bad.planes[1].edges[0].type = "n"            # R2.h1 označená ako nárožie, v
 tc = qa.check_edge_type_consistency(bad)
 check("h vs n na tej istej čiare sa zachytí", len(tc) == 1, str(tc))
 
-print("výšky odkvapu sa berú z roviny, nie z uložených z-hodnôt hrany")
+print("sklon odkvapu: väčší z uložených výšok hrany a výšok roviny")
 bad2 = contract.RoofModel.from_json(clean.to_json())
-bad2.planes[0].edges[0] = E("o1", "o", P(0, 0, 0), P(10, 0, 1.5), False)   # uložené z stúpa (8,5°), rovina je tam vodorovná
-ev = qa.check_eave_horizontal(bad2)
-check("odkvap, ktorý je v rovine vodorovný, sa neoznačí len kvôli zlému uloženému z", len(ev) == 0, str(ev))
+bad2.planes[0].edges[0] = E("o1", "o", P(0, 0, 0), P(10, 0, 1.5), False)   # uložené z stúpa (8,5°), rovina je vodorovná
+check("stúpajúce uložené z sa zachytí", len(qa.check_eave_horizontal(bad2)) == 1)
+
+print("rovina bez hrán a kontrakt s area_true_m2")
+legacy = contract.RoofModel.from_json(clean.to_json())
+for pl in legacy.planes:
+    pl.edges = []
+check("legacy rovina bez akýchkoľvek hrán nehlási plane_has_eave", qa.check_plane_has_eave(legacy) == [])
+withtrue = contract.RoofModel.from_json(clean.to_json())
+for pl in withtrue.planes:
+    pl.area_true_m2 = round(pl.area_m2 / math.cos(math.radians(pl.pitch_deg)), 2)
+check("keď kontrakt nesie area_true_m2, areas_true mlčí", qa.check_areas_true(withtrue) == [])
+
+print("závažnosť sa dá zmeniť na jednom mieste")
+check("SEVERITY: štít/odkvap/typy sú chyby, plocha je info",
+      qa.SEVERITY["gable_shared"] == "error" and qa.SEVERITY["areas_true"] == "info")
 
 print(f"\nVYSLEDOK: {ok} OK, {fail} FAIL")
 sys.exit(1 if fail else 0)
