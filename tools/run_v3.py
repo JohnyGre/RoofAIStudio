@@ -32,7 +32,7 @@ except Exception:
 
 import numpy as np
 
-from app.core import contract, engine, gis, ortho, preprocess, qa, registration, vision
+from app.core import contract, eaves, engine, gis, ortho, preprocess, qa, reconcile, registration, vision
 
 DEFAULT = {"lat": 48.39559280067209, "lon": 17.585647957122642, "name": "Triova_7751_16A_Trnava"}
 LAZ_DIR = ROOT / "data" / "laz"
@@ -515,6 +515,31 @@ def main() -> int:
     )
     base = OUT / f"{safe}"
     (OUT).mkdir(parents=True, exist_ok=True)
+
+    # 4b) Doplnenie chýbajúcich odkvapových hrán (úloha 1 z handoveru) — nad kontraktom
+    try:
+        _quar = eaves.quarantine_degenerate_planes(model)
+        if _quar:
+            print("      degenerované roviny (< 1 m², low_confidence): " + ", ".join(_quar))
+        _added = eaves.add_missing_eaves(model)
+        if _added:
+            print("      odkvapy: " + ", ".join(
+                f"{a['plane']}.{a['edge']} {a['action']} ({a['length_m']} m)" for a in _added))
+    except Exception as _ee:
+        print("      doplnenie odkvapov zlyhalo:", _ee)
+
+    # 4c) Finálna očista hrán nad kontraktom (po eaves): duplicita s vlastnou X hranou sa ORIEZNE
+    #     (nie zmaže celá); 's' na presnej hrane inej roviny prevezme jej typ. Viď app/core/reconcile.py.
+    try:
+        _rc = reconcile.reconcile_edges(model)
+        if any(_rc.values()):
+            print(f"      očista hrán: orezané {_rc['trimmed']}, odstránené {_rc['dropped']}, "
+                  f"pretypované {_rc['retyped']}")
+    except Exception as _ce:
+        print("      očista hrán zlyhala:", _ce)
+
+
+
     Path(str(base) + "_roofmodel_v3.json").write_text(model.to_json(), encoding="utf-8")
 
     # 5) REGISTRÁCIA + QA

@@ -14,6 +14,10 @@ echo   (test mosta hran desktop-^>kontrakt)
 "%PY%" tests\test_edges_bridge.py || exit /b 1
 echo   (test QA kontrol hrán)
 "%PY%" tests\test_edge_qa.py || exit /b 1
+echo   (test doplnenia odkvapov)
+"%PY%" tests\test_eaves.py || exit /b 1
+echo   (test finálnej očisty hrán)
+"%PY%" tests\test_reconcile.py || exit /b 1
 
 echo === 2/5 selfcheck (kontrakt/fuzia/registracia/QA) ===
 "%PY%" tools\core_selfcheck.py || exit /b 1
