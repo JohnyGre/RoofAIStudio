@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoofAIStudio — zadanie pre Claude (handover)</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161a20; --ink:#e8eaf0; --muted:#9aa3b2; --line:#252b35;
+    --accent:#7aa2f7; --ok:#5ec27b; --warn:#e0af68; --err:#f7768e; --code:#11141a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .wrap{max-width:980px;margin:0 auto;padding:40px 24px 80px}
+  h1{font-size:30px;line-height:1.2;margin:0 0 6px}
+  h2{font-size:20px;margin:36px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  h3{font-size:16px;margin:22px 0 8px;color:var(--accent)}
+  p{margin:8px 0}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:22px}
+  .badges{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 8px}
+  .badge{font-size:12.5px;padding:5px 10px;border-radius:999px;border:1px solid var(--line);background:var(--panel)}
+  .badge.ok{color:var(--ok);border-color:#2b4a37}
+  .badge.info{color:var(--accent);border-color:#2b3a57}
+  .badge.warn{color:var(--warn);border-color:#4a3f28}
+  table{width:100%;border-collapse:collapse;margin:14px 0;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);font-size:13.5px;vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+  tr:last-child td{border-bottom:none}
+  code{background:var(--code);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+  pre code{background:none;border:none;padding:0;font-size:12.5px;line-height:1.55}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  ul{margin:8px 0;padding-left:22px}
+  li{margin:5px 0}
+  .task{border-left:3px solid var(--accent);padding-left:14px;margin:18px 0}
+  .task h3{margin-top:0}
+  .done{color:var(--ok)}
+  .todo{color:var(--warn)}
+  .err{color:var(--err)}
+  .small{color:var(--muted);font-size:13px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+  footer{margin-top:48px;color:var(--muted);font-size:12.5px;border-top:1px solid var(--line);padding-top:14px}
+  @media print{
+    :root{--bg:#fff;--panel:#fff;--ink:#111;--muted:#555;--line:#ddd;--code:#f6f6f6}
+    body{font-size:12px}
+    .wrap{padding:0}
+    pre,table,.card{page-break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>RoofAIStudio — stav projektu a zadanie pre Claude</h1>
+<div class="sub">Handover z 2026-10-06 · repozitár <span class="mono">github.com/JohnyGre/RoofAIStudio</span> · branch <span class="mono">master</span></div>
+
+<div class="badges">
+  <span class="badge ok">CI OK (testy → QA → regresia 3 adresy → export)</span>
+  <span class="badge ok">QA: 0 chýb na všetkých adresách</span>
+  <span class="badge ok">Deterministický beh (2× rovnaký výsledok)</span>
+  <span class="badge info">Kontrakt schema 3.0.0 · EPSG:8353</span>
+  <span class="badge warn">Otvorené: obrys ZBGIS, odkvapové hrany, inštančný model</span>
+</div>
+
+<h2>1. Čo je projekt</h2>
+<p>Automatické modelovanie striech: z adresy/GPS vyrobí <b>roviny strechy</b>, <b>klasifikované hrany</b>
+(odkvap <span class="mono">o</span>, hrebeň <span class="mono">h</span>, nárožie <span class="mono">n</span>,
+úžľabie <span class="mono">u</span>, štít <span class="mono">s</span>), presné polygóny v <b>S-JTSK (EPSG:8353)</b>
+a balík výstupov: JSON kontrakt, DXF, HTML report, izometrický technický výkres (SVG/PNG), GeoTIFF + GeoJSON.
+Beží lokálne, deterministicky, bez LLM v geometrii.</p>
+
+<h3>Architektúra — kto je autorita pre čo</h3>
+<table>
+<tr><th>Zdroj</th><th>Rola</th><th>Poznámka</th></tr>
+<tr><td>LiDAR (LAZ, trieda 6)</td><td><b>autorita geometrie</b> — roviny, sklony, výšky</td><td>ZBGIS/MAPKA, S-JTSK JTSK03 + Bpv, cyklus 2018 (~5 b/m²)</td></tr>
+<tr><td>GIS obrys budovy</td><td>planimetrická autorita (orezanie mračna)</td><td>OSM s geometriou; ZBGIS WFS pripravený (<span class="mono">gis.zbgis_footprint</span>)</td></tr>
+<tr><td>Vycvičený model (YOLO-seg)</td><td>typológia + planimetrický podklad + QA</td><td><span class="mono">ai_models/roof_gmaps_v2_last.pt</span>, 5 tried typov; IoU voči mračnu 0,76</td></tr>
+<tr><td>Ortofoto ZBGIS (WMS)</td><td>vizuálna kontrola a prekrytie geometrie</td><td>4096 px, ≈0,7 cm/px</td></tr>
+<tr><td>LLM</td><td><b>nie je</b> v geometrii</td><td>len plán/QA/reportovanie (mimo kódu pipeline)</td></tr>
+</table>
+
+<h2>2. Overené výsledky (posledné behy)</h2>
+<table>
+<tr><th>Adresa</th><th>Rovín</th><th>Plocha (pôdorys)</th><th>Pôdorys budovy</th><th>Pomer</th><th>Hrany o/h/n/u/s</th><th>QA</th></tr>
+<tr><td>Átriová 7751/16A, Trnava</td><td>11</td><td>287,03 m²</td><td>343,69 m²</td><td>0,84</td><td>10/8/14/15/12</td><td><span class="done">0 chýb</span> / 7 varovaní</td></tr>
+<tr><td>Átriová 9309/16, Trnava</td><td>4</td><td>131,06 m²</td><td>—</td><td>—</td><td>4/3/6/2/4</td><td><span class="done">0 chýb / 0 varovaní</span></td></tr>
+<tr><td>Beluj 50, B. Štiavnica</td><td>9</td><td>186,05 m²</td><td>—</td><td>—</td><td>5/6/13/6/11</td><td><span class="done">0 chýb</span> / 7 varovaní</td></tr>
+</table>
+<p class="small">Skutočná plocha strechy (šikmá) je o +11 % (26°) až +16 % (30°) väčšia než pôdorysný súčet —
+kontrakt má pole <span class="mono">area_true_m2</span> a QA to hlási ako <b>info</b>.</p>
+
+<h3>Testy a brány</h3>
+<table>
+<tr><th>Sada</th><th>Obsah</th><th>Výsledok</th></tr>
+<tr><td><span class="mono">tests/test_core_contract.py</span></td><td>kontrakt, fúzia, QA jadro</td><td class="done">13 OK</td></tr>
+<tr><td><span class="mono">tests/test_edges_bridge.py</span></td><td>most desktop → kontrakt (sedlová/valbová/T)</td><td class="done">16 OK</td></tr>
+<tr><td><span class="mono">tests/test_edge_qa.py</span></td><td>QA kontroly hrán na reálnej vzorke z auditu + bez falošných poplachov</td><td class="done">20 OK</td></tr>
+<tr><td><span class="mono">tools/regression.py</span></td><td>3 adresy, kritériá kvality</td><td class="done">PASS</td></tr>
+<tr><td><span class="mono">tools/ci.cmd</span></td><td>celý reťaz</td><td class="done">CI OK (exit 0)</td></tr>
+</table>
+
+<h2>3. Čo je implementované (kľúčové moduly)</h2>
+<div class="grid">
+  <div class="card"><b>app/core/</b>
+    <ul>
+      <li><span class="mono">engine.py</span> — RANSAC, CC split, zlúčenie rovín, pravidelné tvary, orezanie susedmi, snap vrcholov, klasifikácia hrán, komíny/panely, uzavretý obvod odkvapu</li>
+      <li><span class="mono">contract.py</span> — schema 3.0.0, validácia, <span class="mono">area_true_m2</span></li>
+      <li><span class="mono">edges.py</span> — most desktop → kontrakt (presné hrany z priesečníc)</li>
+      <li><span class="mono">qa.py</span> — kontroly geometrie aj konzistencie hrán (kategórie error/warning/info)</li>
+      <li><span class="mono">gis.py</span>, <span class="mono">ortho.py</span>, <span class="mono">vision.py</span>, <span class="mono">preprocess.py</span>, <span class="mono">registration.py</span>, <span class="mono">fusion.py</span></li>
+    </ul>
+  </div>
+  <div class="card"><b>tools/</b>
+    <ul>
+      <li><span class="mono">run_v3.py</span> — orchestrátor (GPS → LiDAR → GIS/vision → engine → kontrakt → QA → výkresy)</li>
+      <li><span class="mono">regression.py</span> — regresný test 3 adries</li>
+      <li><span class="mono">render_iso.py</span> — izometrický výkres (SVG + PNG)</li>
+      <li><span class="mono">v3_export.py</span> — DXF (vrstvy) + HTML report</li>
+      <li><span class="mono">qa_gate.py</span>, <span class="mono">core_selfcheck.py</span>, <span class="mono">ci.cmd</span></li>
+    </ul>
+  </div>
+</div>
+
+<h3>Spustenie a overenie</h3>
+<pre><code>py -m venv .venv &amp;&amp; .venv\Scripts\pip install -r requirements.txt
+
+# jedna adresa (plný výstup + výkres + report)
+.venv\Scripts\python.exe tools\run_v3.py --lat 48.3955928 --lon 17.5856480 --name Triova --ortho
+
+# celý CI reťaz (testy → selfcheck → QA → regresia 3 adresy → export) → očakáva sa "CI OK"
+tools\ci.cmd</code></pre>
+
+<h2>4. Zadanie pre Claude (v poradí priority)</h2>
+
+<div class="task">
+<h3>Úloha 1 — Doplniť odkvapové hrany pre roviny bez nich <span class="todo">(najbližšie)</span></h3>
+<p>Po sprísnení pravidla „odkvap musí byť vodorovný (≤ 6°)" hlási QA <span class="mono">plane_has_eave</span>
+pre niektoré roviny (Triova 2×, Beluj 3×): ich skutočný odkvap zmizol pri orezávaní polygónu.</p>
+<p><b>Postup:</b> pre každú rovinu bez <span class="mono">o</span> hrany nájsť na vonkajšom obvode strechy
+(<span class="mono">engine.roof_outline_ring</span>) úsek, ktorý patrí tejto rovine (bod v polygóne, blízko
+roviny), a vložiť ho ako <span class="mono">o</span> hranu s výškami z roviny (oba konce).</p>
+<p><b>Akceptačné kritérium:</b> <span class="mono">test_edge_qa.py</span> a <span class="mono">ci.cmd</span>
+prejdú; <span class="mono">plane_has_eave</span> varovania klesnú na 0 na všetkých 3 adresách;
+hrany <span class="mono">o</span> naďalej vodorovné (≤ 6°).</p>
+</div>
+
+<div class="task">
+<h3>Úloha 2 — Katastrálny obrys budovy (ZBGIS) <span class="todo">(blokuje presnosť)</span></h3>
+<p>Dnes je obrys z OSM (generalizovaný) alebo aproximácia. Verejný WFS vracia 404; treba overiť konkrétnu
+vrstvu alebo podporiť import exportu z MAPKA (SHP/GeoJSON/DXF).</p>
+<p><b>Miesto:</b> <span class="mono">app/core/gis.py::zbgis_footprint()</span> (zámerne
+<span class="mono">NotImplementedError</span>, nikdy nerobí tichý fallback).</p>
+<p><b>Akceptačné kritérium:</b> po dodaní obrysu sa mračno oreže ním; QA <span class="mono">area_vs_footprint</span>
+ostane v [0,55; 1,8]; odchýlka hrán voči ortofotu klesne pod 0,3 m (dnes 0,66–0,92 m — merané
+skriptom na porovnanie hrán a najtmavších línií v ortofote).</p>
+</div>
+
+<div class="task">
+<h3>Úloha 3 — Inštančný segmentačný model <span class="todo">(presné hranice plôch)</span></h3>
+<p>Súčasný model delí <b>typy</b> striech (5 tried), nie jednotlivé roviny — preto sa nedá použiť
+na definíciu plôch (skúšané: fity na masky dávali sklony 25–65°).</p>
+<p><b>Postup bez externých dát:</b> vygenerovať tréningové dáta z overených v3 výstupov
+(rovinové polygóny v S-JTSK → masky v rastri ortofota; kód je v <span class="mono">preprocess.py</span>)
+a dotrénovať YOLO-seg na inštancie (ultralytics + CUDA je vo venv).</p>
+<p><b>Akceptačné kritérium:</b> IoU inštancií ≥ 0,7 na validačnej časti; pipeline s ním dosiahne
+plochy s odchýlkou hrán &lt; 0,3 m na 3 testovacích adresách.</p>
+</div>
+
+<div class="task">
+<h3>Úloha 4 — Zníženie fragmentácie rovín</h3>
+<p>Na Triovej je 11 rovín (reálne ~6–8). Príčina: fragmenty z RANSAC + chýbajúci presný obrys.
+Po úlohách 2–3 overiť, či fragmentácia klesla; prípadne doladiť zlučovanie
+(<span class="mono">merge_coplanar_planes</span>, priestorová blízkosť 0,8 m).</p>
+<p><b>Akceptačné kritérium:</b> počet rovín na Triovej ≤ 8 pri zachovaní 6 úžľabí / 4 hrebeňov,
+ktoré používateľ potvrdil ako realitu strechy.</p>
+</div>
+
+<h2>5. Pravidlá, ktoré treba dodržať (overené praxou)</h2>
+<ul>
+  <li><b>LLM nesmie počítať geometriu</b> — čísla (súradnice, sklony, dĺžky) vznikajú len v deterministickom kóde.</li>
+  <li><b>Odkvap je vodorovný</b> (≤ 6°); stúpajúca „najnižšia" hrana je štít.</li>
+  <li><b>Spoločná hrana dvoch rovín nesmie byť štít</b> a musí mať rovnaký typ v oboch rovinách.</li>
+  <li><b>Žiadne duplicity</b> — ak existuje presná hrana z priesečnice (X), polygónová na tej istej čiare sa vyhodí.</li>
+  <li><b>Susedné plochy zdieľajú hranu</b> (snap vrcholov; medzery &gt; 5 cm = QA nález).</li>
+  <li><b><span class="mono">area_m2</span> je pôdorys</b>; na materiál použiť <span class="mono">area_true_m2</span>.</li>
+  <li><b>Zmena = zelené CI</b>: <span class="mono">tools\ci.cmd</span> musí skončiť „CI OK".</li>
+  <li>Slovenská diakritika v UTF-8; CSV s <span class="mono">;</span> a desatinnou čiarkou (ak sa pridajú).</li>
+</ul>
+
+<h2>6. Kľúčové odkazy</h2>
+<table>
+<tr><th>Čo</th><th>Kde</th></tr>
+<tr><td>Vstupný bod pre agenta</td><td class="mono">README.md → README_V3.md</td></tr>
+<tr><td>Mapa súborov a kontrakt</td><td class="mono">README_V3.md (sekcie 3–5)</td></tr>
+<tr><td>Testovacie adresy (GPS, dlaždice, výsledky)</td><td class="mono">docs/v3/testovacie_adresy.md</td></tr>
+<tr><td>Opravy podľa auditu hrán</td><td class="mono">docs/v3/opravy_podla_auditu.md</td></tr>
+<tr><td>Vzorky výstupov (kontrakty, QA, report)</td><td class="mono">docs/v3/priklady/</td></tr>
+<tr><td>Posledné commity</td><td class="mono">06fc479 (QA z auditu) · ab2b6c6 (opravy hrán) · 24dc7b2 (most hrán)</td></tr>
+</table>
+
+<footer>
+Vygenerované 2026-10-06 pre odovzdanie Claudovi. Všetky čísla v dokumente sú z reálnych behov
+(<span class="mono">tools\ci.cmd</span>, <span class="mono">tools\regression.py</span>) — žiadne odhady.
+Repozitár: github.com/JohnyGre/RoofAIStudio
+</footer>
+
+</div>
+</body>
+</html>
