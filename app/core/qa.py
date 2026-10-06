@@ -21,12 +21,25 @@ AREA_SUM_TOLERANCE = 0.25     # 25 % odchýlka súčtu plôch od pôdorysu
 GAP_TOL_M = 0.05              # považovať vrcholy za spoločné
 
 # --- konzistencia hrán ---
-EAVE_MAX_DEG = 6.0            # odkvap musí byť takmer vodorovný
+EAVE_MAX_DEG = 8.0            # odkvap musí byť takmer vodorovný. Dáta (Triova, Beluj): skutočné odkvapy
+                              # majú sklon 0–6,6° (kvôli posunu rohu polygónu), štíty a bočnice ≥ 11°.
+DEGENERATE_AREA_M2 = 1.0      # rovina menšia než 1 m² je artefakt (rovnaký prah ako legacy low_confidence)
 COINCIDE_TOL_M = 0.6          # dve hrany „ležia na tej istej čiare" (XY)
 COINCIDE_MAX_ANGLE_DEG = 15.0
 COINCIDE_MIN_OVERLAP = 0.5    # prekrytie ≥ 50 % kratšej hrany (kolineárne susedné úseky sa nerátajú)
 PITCHED_MIN_DEG = FLAT_MAX_DEG
-AREA_TRUE_INFO_MIN_REL = 0.03  # info o skutočnej ploche len ak sa líši > 3 %
+AREA_TRUE_INFO_MIN_REL = 0.05  # info o skutočnej ploche len ak sa líši > 5 % (sklon > ~18°)
+
+# Závažnosť na jednom mieste. Štrukturálne rozpory v klasifikácii hrán sú chyby (CI ich
+# musí zastaviť), duplicity a chýbajúci odkvap varovania, plocha len informácia (nemení verdikt).
+SEVERITY = {
+    "eave_horizontal": "error",
+    "gable_shared": "error",
+    "edge_type_consistency": "error",
+    "duplicate_edges": "warning",
+    "plane_has_eave": "warning",
+    "areas_true": "info",
+}
 
 
 def _plane_area(vertices: List[List[float]]) -> float:
@@ -202,22 +215,31 @@ def _plane_z_fn(vertices):
     return lambda x, y: float(coef[0] * (x - c[0]) + coef[1] * (y - c[1]) + coef[2])
 
 
-def _eave_slope_deg(plane, edge) -> float:
-    """Sklon hrany v stupňoch. Výšky berieme z ROVINY (nie z uložených z hrany):
-    uložený odkvap mal oba konce v rovnakej výške, aj keď hrana v skutočnosti stúpala."""
+def _edge_slope_deg(edge) -> float:
+    """Sklon hrany podľa z-hodnôt uložených na jej koncoch."""
     (x0, y0), (x1, y1) = _seg_xy(edge)
     length = math.hypot(x1 - x0, y1 - y0)
     if length < 0.1:
         return 0.0
+    return math.degrees(math.atan2(abs(float(edge.end[2]) - float(edge.start[2])), length))
+
+
+def _eave_slope_deg(plane, edge) -> float:
+    """Sklon hrany ako väčší z dvoch odhadov: z uložených výšok hrany a z výšok ROVINY
+    v koncových bodoch. Uložený z sám nestačí: pôvodný chybný odkvap mal oba konce v rovnakej
+    výške, hoci hrana v rovine stúpala. Naopak z roviny samotnej nechytí hranu s nesprávnym z."""
+    (x0, y0), (x1, y1) = _seg_xy(edge)
+    length = math.hypot(x1 - x0, y1 - y0)
+    if length < 0.1:
+        return 0.0
+    slope = _edge_slope_deg(edge)
     fn = _plane_z_fn(plane.vertices)
     if fn is not None:
-        dz = fn(x1, y1) - fn(x0, y0)
-    else:
-        dz = float(edge.end[2]) - float(edge.start[2])
-    return math.degrees(math.atan2(abs(dz), length))
+        slope = max(slope, math.degrees(math.atan2(abs(fn(x1, y1) - fn(x0, y0)), length)))
+    return slope
 
 
-def check_eave_horizontal(model) -> List[Dict[str, Any]]:
+def check_eave_horizontal(model, max_deg: float = EAVE_MAX_DEG) -> List[Dict[str, Any]]:
     """Odkvap (o) musí byť takmer vodorovný — stúpajúca hrana je štít, nie odkvap."""
     issues: List[Dict[str, Any]] = []
     for p in model.planes:
@@ -225,15 +247,15 @@ def check_eave_horizontal(model) -> List[Dict[str, Any]]:
             if e.type != "o":
                 continue
             ang = _eave_slope_deg(p, e)
-            if ang > EAVE_MAX_DEG:
+            if ang > max_deg:
                 issues.append({"check": "eave_horizontal", "plane": p.id, "edge": e.id,
-                               "severity": "warning",
+                               "severity": SEVERITY["eave_horizontal"],
                                "detail": f"odkvap {e.id} ({e.length_m:.1f} m) stúpa pod {ang:.1f}° "
-                                         f"(> {EAVE_MAX_DEG:.0f}°) — je to štít?"})
+                                         f"(> {max_deg:.0f}°) — je to štít?"})
     return issues
 
 
-def check_gable_shared(model) -> List[Dict[str, Any]]:
+def check_gable_on_shared_edge(model) -> List[Dict[str, Any]]:
     """Štít (s) je voľná hrana — nesmie ležať na hrane inej roviny."""
     issues: List[Dict[str, Any]] = []
     for pa in model.planes:
@@ -246,11 +268,14 @@ def check_gable_shared(model) -> List[Dict[str, Any]]:
                 other = next((eb for eb in pb.edges if _coincide(ea, eb)), None)
                 if other is not None:
                     issues.append({"check": "gable_shared", "plane": pa.id, "edge": ea.id,
-                                   "severity": "warning",
+                                   "severity": SEVERITY["gable_shared"],
                                    "detail": f"štít {pa.id}.{ea.id} leží na hrane {pb.id}.{other.id} "
-                                             f"(typ {other.type}) — spoločná hrana nie je štít"})
-                    break
+                                             f"(typ {other.type}) — spoločná hrana nemôže byť štít"})
+                    break          # jedno hlásenie na štít, nie na každú susednú rovinu
     return issues
+
+
+check_gable_shared = check_gable_on_shared_edge        # alias (pôvodný názov v mojej verzii)
 
 
 def check_duplicate_edges(model) -> List[Dict[str, Any]]:
@@ -261,7 +286,8 @@ def check_duplicate_edges(model) -> List[Dict[str, Any]]:
         for i in range(len(es)):
             for j in range(i + 1, len(es)):
                 if _coincide(es[i], es[j]):
-                    issues.append({"check": "duplicate_edges", "plane": p.id, "severity": "warning",
+                    issues.append({"check": "duplicate_edges", "plane": p.id, "edge": es[j].id,
+                                   "severity": SEVERITY["duplicate_edges"],
                                    "detail": f"{p.id}: hrany {es[i].id} ({es[i].type}) a "
                                              f"{es[j].id} ({es[j].type}) ležia na tej istej čiare"})
     return issues
@@ -279,40 +305,46 @@ def check_edge_type_consistency(model) -> List[Dict[str, Any]]:
                     if ea.type == eb.type or "s" in (ea.type, eb.type):
                         continue
                     if _coincide(ea, eb):
-                        issues.append({"check": "edge_type_consistency", "severity": "warning",
+                        issues.append({"check": "edge_type_consistency", "plane": planes[i].id,
+                                       "edge": ea.id, "severity": SEVERITY["edge_type_consistency"],
                                        "detail": f"{planes[i].id}.{ea.id}={ea.type!r} vs "
                                                  f"{planes[j].id}.{eb.id}={eb.type!r} — tá istá hrana, "
                                                  f"rôzny typ"})
     return issues
 
 
-def check_plane_has_eave(model) -> List[Dict[str, Any]]:
-    """Šikmá rovina má spravidla vodorovný odkvap. Chýba po orezaní/pretypovaní?
-    (Rovina odvodňujúca len do úžľabí ho mať nemusí — preto len varovanie.)"""
+def check_plane_has_eave(model, min_pitch_deg: float = PITCHED_MIN_DEG) -> List[Dict[str, Any]]:
+    """Šikmá rovina má spravidla vodorovný odkvap. Preskakujú sa roviny bez akýchkoľvek hrán
+    (legacy meta) a degenerované roviny (< 1 m²). Malé strmé roviny (vikier, < 15 m²) často
+    odvodňujú do susedov — pre ne je to len informácia."""
     issues: List[Dict[str, Any]] = []
     for p in model.planes:
-        if p.low_confidence or p.pitch_deg <= PITCHED_MIN_DEG or not p.edges:
+        if (p.low_confidence or p.pitch_deg < min_pitch_deg or not p.edges
+                or p.area_m2 < DEGENERATE_AREA_M2):
             continue
-        has = any(e.type == "o" and _eave_slope_deg(p, e) <= EAVE_MAX_DEG for e in p.edges)
-        if not has:
-            issues.append({"check": "plane_has_eave", "plane": p.id, "severity": "warning",
-                           "detail": f"{p.id} (sklon {p.pitch_deg}°) nemá vodorovný odkvap"})
+        if any(e.type == "o" and _eave_slope_deg(p, e) <= EAVE_MAX_DEG for e in p.edges):
+            continue
+        small = p.type == "vikier"
+        issues.append({"check": "plane_has_eave", "plane": p.id,
+                       "severity": "info" if small else SEVERITY["plane_has_eave"],
+                       "detail": f"šikmá rovina ({p.pitch_deg:.1f}°) nemá vodorovný odkvap"
+                                 + (" (malá strmá rovina — môže odvodňovať do susedov)" if small else "")})
     return issues
 
 
-def check_areas_true(model) -> List[Dict[str, Any]]:
+def check_areas_true(model, tol_rel: float = AREA_TRUE_INFO_MIN_REL) -> List[Dict[str, Any]]:
     """`area_m2` je pôdorysný priemet (shoelace v XY). Skutočná plocha = priemet / cos(sklon).
-    Informatívne: nemení verdikt, len upozorní pred kalkuláciou materiálu."""
+    Ak kontrakt už nesie `area_true_m2`, upozornenie netreba — kalkulácia ho vidí priamo."""
     issues: List[Dict[str, Any]] = []
     planes = [p for p in model.planes if not p.low_confidence and p.area_m2 > 0]
-    if not planes:
+    if not planes or all(getattr(p, "area_true_m2", None) for p in planes):
         return issues
     planar = sum(p.area_m2 for p in planes)
-    true = sum(p.area_m2 / max(math.cos(math.radians(p.pitch_deg)), 0.2) for p in planes)
+    true = sum(p.area_m2 / max(math.cos(math.radians(min(89.0, p.pitch_deg))), 0.2) for p in planes)
     rel = true / planar - 1.0
     declared = model.roof_area_m2
-    if rel > AREA_TRUE_INFO_MIN_REL and (declared is None or abs(planar - declared) / planar < 0.02):
-        issues.append({"check": "areas_true", "severity": "info",
+    if rel > tol_rel and (declared is None or abs(planar - declared) / planar < 0.02):
+        issues.append({"check": "areas_true", "severity": SEVERITY["areas_true"],
                        "detail": f"area_m2 je pôdorysný priemet ({planar:.1f} m²); skutočná plocha "
                                  f"strechy ≈ {true:.1f} m² (+{rel * 100:.0f} %) — pre materiál použi tú"})
     return issues
@@ -327,7 +359,7 @@ def run_all_checks(model) -> Dict[str, Any]:
     issues += check_gaps(model)
     issues += check_edge_types(model)
     issues += check_eave_horizontal(model)
-    issues += check_gable_shared(model)
+    issues += check_gable_on_shared_edge(model)
     issues += check_duplicate_edges(model)
     issues += check_edge_type_consistency(model)
     issues += check_plane_has_eave(model)
