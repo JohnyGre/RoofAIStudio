@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoofAIStudio v3 — výsledky testov</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161a20; --ink:#e8eaf0; --muted:#9aa3b2; --line:#252b35;
+    --accent:#7aa2f7; --ok:#5ec27b; --warn:#e0af68; --err:#f7768e; --code:#11141a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .wrap{max-width:1000px;margin:0 auto;padding:40px 24px 80px}
+  h1{font-size:29px;line-height:1.2;margin:0 0 6px}
+  h2{font-size:20px;margin:36px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  h3{font-size:16px;margin:22px 0 8px;color:var(--accent)}
+  p{margin:8px 0}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:22px}
+  .badges{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 8px}
+  .badge{font-size:12.5px;padding:5px 10px;border-radius:999px;border:1px solid var(--line);background:var(--panel)}
+  .badge.ok{color:var(--ok);border-color:#2b4a37}
+  .badge.info{color:var(--accent);border-color:#2b3a57}
+  .badge.warn{color:var(--warn);border-color:#4a3f28}
+  table{width:100%;border-collapse:collapse;margin:14px 0;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);font-size:13.5px;vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+  tr:last-child td{border-bottom:none}
+  code{background:var(--code);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+  pre code{background:none;border:none;padding:0;font-size:12.5px;line-height:1.55}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  ul{margin:8px 0;padding-left:22px}
+  li{margin:5px 0}
+  .done{color:var(--ok);font-weight:600}
+  .num{font-variant-numeric:tabular-nums}
+  .small{color:var(--muted);font-size:13px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+  footer{margin-top:48px;color:var(--muted);font-size:12.5px;border-top:1px solid var(--line);padding-top:14px}
+  @media print{
+    :root{--bg:#fff;--panel:#fff;--ink:#111;--muted:#555;--line:#ddd;--code:#f6f6f6}
+    body{font-size:12px}
+    .wrap{padding:0}
+    pre,table,.card{page-break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>RoofAIStudio v3 — výsledky testov</h1>
+<div class="sub">Beh: 2026-10-06 23:2x · verzia: commit <span class="mono">3badfab</span> (master) · prostredie: lokálne (venv, CUDA)</div>
+
+<div class="badges">
+  <span class="badge ok">CI OK (exit 0)</span>
+  <span class="badge ok">98 testov, 0 FAIL</span>
+  <span class="badge ok">3/3 adresy QA PASS (0 chýb / 0 varovaní)</span>
+  <span class="badge info">deterministické behy (2× = rovnaký výsledok)</span>
+  <span class="badge info">kontrakt schema 3.0.0 · EPSG:8353</span>
+</div>
+
+<h2>1. Testy (5 sád, jeden príkaz)</h2>
+<table>
+<tr><th>Sada</th><th>Čo overuje</th><th class="num">Výsledok</th></tr>
+<tr><td class="mono">tests/test_core_contract.py</td><td>kontrakt (schema, validácia), fúzia zdrojov, QA jadro</td><td class="done num">13 OK</td></tr>
+<tr><td class="mono">tests/test_edges_bridge.py</td><td>most desktop → kontrakt: presné hrany z priesečníc (sedlová / valbová / T-strecha)</td><td class="done num">16 OK</td></tr>
+<tr><td class="mono">tests/test_edge_qa.py</td><td>QA kontroly hrán na reálnej vzorke z auditu + bez falošných poplachov</td><td class="done num">24 OK</td></tr>
+<tr><td class="mono">tests/test_eaves.py</td><td>doplnenie odkvapov: quarantine degenerovaných rovín, povýšenie s→o, strmé plochy len info</td><td class="done num">31 OK</td></tr>
+<tr><td class="mono">tests/test_reconcile.py</td><td>finálna očista hrán: orezanie duplicity s X hranou (nie mazanie), prevzatie typu</td><td class="done num">14 OK</td></tr>
+<tr><td><b>Spolu</b></td><td><span class="small">spúšťa <span class="mono">tools\ci.cmd</span></span></td><td class="done num"><b>98 OK, 0 FAIL</b></td></tr>
+</table>
+
+<h2>2. Pipeline na overených adresách (regresný test)</h2>
+<table>
+<tr><th>Adresa</th><th class="num">Čas</th><th class="num">Rovín</th><th class="num">Plocha (pôdorys)</th><th class="num">Pôdorys</th><th class="num">Pomer</th><th>Hrany o/h/n/u/s</th><th class="num">QA</th><th class="num">Verdikt</th></tr>
+<tr><td>Átriová 7751/16A, Trnava</td><td class="num">36,5 s</td><td class="num">11</td><td class="num">287,03 m²</td><td class="num">343,69 m²</td><td class="num">0,84</td><td class="mono">11/8/14/8/9</td><td class="num">0 chýb / 0 var. / 1 info</td><td class="done">PASS</td></tr>
+<tr><td>Átriová 9309/16, Trnava</td><td class="num">79,2 s</td><td class="num">4</td><td class="num">131,06 m²</td><td class="num">—</td><td class="num">—</td><td class="mono">4/3/6/2/4</td><td class="num">0 chýb / 0 var. / 0 info</td><td class="done">PASS</td></tr>
+<tr><td>Beluj 50, B. Štiavnica</td><td class="num">76,6 s</td><td class="num">9</td><td class="num">186,05 m²</td><td class="num">—</td><td class="num">—</td><td class="mono">7/6/13/4/8</td><td class="num">0 chýb / 0 var. / 2 info</td><td class="done">PASS</td></tr>
+</table>
+<p class="small">Kritériá regresie: 0 chýb kontraktu · QA bez chýb · ≥ 3 roviny · ≥ 3 klasifikované hrany · pomer plocha/pôdorys v [0,55; 1,8].
+<b>info</b> = informatívne zistenia, ktoré nemenia verdikt (pôdorysná vs. skutočná plocha; malé strmé roviny bez odkvapu — môžu odvodňovať do susedov).</p>
+
+<h2>3. Čo kontroly zachytili a čo sa opravilo</h2>
+<div class="card">
+<b>Audit (Átriová 9309/16) → 6 nových QA kontrol:</b>
+<ul>
+  <li><span class="mono">eave_horizontal</span> — odkvap musí byť vodorovný (≤ 6°), inak je to štít; sklon sa počíta <b>z roviny</b>, nie z uložených Z hrany</li>
+  <li><span class="mono">gable_shared</span> — štít je voľná hrana, nesmie ležať na hrane inej roviny</li>
+  <li><span class="mono">duplicate_edges</span> — tá istá hrana nesmie byť v kontrakte 2× (≥ 50 % prekrytia, aby kolineárne kusy hrebeňa neboli falošná duplicita)</li>
+  <li><span class="mono">edge_type_consistency</span> — spoločná hrana má v oboch rovinách rovnaký typ</li>
+  <li><span class="mono">plane_has_eave</span> — šikmá rovina má mať vodorovný odkvap (malé strmé → len info)</li>
+  <li><span class="mono">areas_true</span> — <span class="mono">area_m2</span> je pôdorys; skutočná plocha je o +11 % (26°) až +16 % (30°) väčšia → kontrakt nesie <span class="mono">area_true_m2</span></li>
+</ul>
+</div>
+<table>
+<tr><th>Adresa</th><th>Odkvapy (eaves.py)</th><th>Degenerované roviny (quarantine)</th><th>Očista (reconcile.py)</th></tr>
+<tr><td>Átriová 7751/16A</td><td>R4.o1 <b>promoted</b> 11,19 m · R5.o1 <b>promoted</b> 5,23 m</td><td>R1 (0 m²)</td><td>žiadne zmeny</td></tr>
+<tr><td>Átriová 9309/16</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>Beluj 50</td><td>R4.o1 <b>added</b> 11,93 m · R9.o1 <b>promoted</b> 6,15 m</td><td>R5 (0,21 m²)</td><td>R1 hrebeň zachovaný (15,56 m)</td></tr>
+</table>
+<p class="small">Oprava, ktorú odhalil Claude: pôvodný inline blok v run_v3 mazal celú polygónovú hranu pri duplicite s X hranou —
+na Beluji R1 tak zmizol 14,5 m hrebeň (pokrytie obvodu 100 % → 67 %). <span class="mono">reconcile.py</span> hranu <b>oreže</b> na nepokryté kusy, tie si zachovajú typ aj výšky.</p>
+
+<h2>4. Ako to reprodukovať</h2>
+<pre><code>cd C:\Users\jangr\.gemini\antigravity\playground\RoofAIStudio
+tools\ci.cmd                          # testy → selfcheck → QA → regresia 3 adresy → export   → "CI OK"
+
+# jedna adresa (plný beh + výkres + DXF + HTML report)
+.venv\Scripts\python.exe tools\run_v3.py --lat 48.3955928 --lon 17.5856480 --name Triova --ortho
+
+# len testy
+for %t in (test_core_contract test_edges_bridge test_edge_qa test_eaves test_reconcile) do .venv\Scripts\python.exe tests\%t.py</code></pre>
+
+<h2>5. Odkazy</h2>
+<table>
+<tr><th>Čo</th><th>Kde</th></tr>
+<tr><td>Repozitár (kód + dokumentácia + vzorky)</td><td class="mono">github.com/JohnyGre/RoofAIStudio</td></tr>
+<tr><td>Posledný sync commit</td><td class="mono">3badfab</td></tr>
+<tr><td>QA reporty a kontrakty</td><td class="mono">docs/v3/priklady/</td></tr>
+<tr><td>Regresný report</td><td class="mono">docs/v3/priklady/regression_report.md</td></tr>
+</table>
+
+<footer>
+Vygenerované z reálneho behu <span class="mono">tools\ci.cmd</span> (log: <span class="mono">output/v3/ci_last_run.log</span>).
+Žiadne čísla nie sú odhady — pochádzajú z kontraktov, QA reportov a testovacích výstupov.
+</footer>
+
+</div>
+</body>
+</html>
