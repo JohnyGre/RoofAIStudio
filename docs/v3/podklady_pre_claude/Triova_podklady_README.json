@@ -1,0 +1,41 @@
+{
+  "adresa": "7751/16A, Átriová, Kopánka, 917 01 Trnava",
+  "gps_wgs84": {
+    "lat": 48.39559280067209,
+    "lon": 17.585647957122642
+  },
+  "stred_sjtsk_8353": {
+    "x": -535692.92,
+    "y": -1256458.052
+  },
+  "radius_m": 35.0,
+  "pocet_bodov": 103517,
+  "triedy": {
+    "1": 2562,
+    "2": 51877,
+    "3": 4023,
+    "4": 10031,
+    "5": 19137,
+    "6": 15737,
+    "7": 150
+  },
+  "bbox_8353": {
+    "xmin": -535727.9,
+    "ymin": -1256493.05,
+    "xmax": -535657.94,
+    "ymax": -1256423.07,
+    "zmin": 149.21,
+    "zmax": 166.02
+  },
+  "zdroj_laz": [
+    "05_Trnava_18_246985_5365887_a_c_jtsk03_bpv_clip.laz",
+    "05_Trnava_18_247065_5365631_a_c_jtsk03_bpv_clip.laz",
+    "05_Trnava_18_247070_5366181_a_c_jtsk03_bpv_clip.laz"
+  ],
+  "crs": "EPSG:8353 — S-JTSK [JTSK03] / Krovak East North + Bpv (výšky)",
+  "susedne_subory": {
+    "ortofoto": "output/v3/Triova_7751_16A_Trnava_ortofoto_max.jpg (4096 px, EPSG:3857, výrez ~39 m)",
+    "kontrakt": "output/v3/Triova_7751_16A_Trnava_roofmodel_v3.json",
+    "qa": "output/v3/Triova_7751_16A_Trnava_roofmodel_v3_qa.json"
+  }
+}
